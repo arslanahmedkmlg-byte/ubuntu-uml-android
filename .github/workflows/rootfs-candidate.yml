@@ -7,7 +7,7 @@ on:
         required: true
         default: noble
         type: choice
-        options: [noble, jammy]
+        options: [noble]
       disk_size_mib:
         description: Virtual disk size in MiB
         required: true
@@ -28,11 +28,11 @@ jobs:
           OUT_DIR: ${{ github.workspace }}/out
           WORK_DIR: ${{ github.workspace }}/.work
         run: sudo -E ./scripts/build-ubuntu-rootfs.sh
-      - name: Structural checks
-        run: ./scripts/check-rootfs-image.sh out/ubuntu-${{ inputs.ubuntu_release }}-arm64.ext4
+      - name: Validate actual ext4 filesystem and Ubuntu services
+        run: sudo ./scripts/check-rootfs-image.sh out/ubuntu-${{ inputs.ubuntu_release }}-arm64.ext4
       - uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-${{ inputs.ubuntu_release }}-arm64-ext4-candidate
+          name: ubuntu-${{ inputs.ubuntu_release }}-arm64-ext4-baseline-v2
           path: |
             out/ubuntu-${{ inputs.ubuntu_release }}-arm64.ext4
             out/ubuntu-${{ inputs.ubuntu_release }}-arm64.ext4.sha256
