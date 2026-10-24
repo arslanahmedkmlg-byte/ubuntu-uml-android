@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 
 import androidx.compose.material3.*
@@ -40,6 +41,9 @@ class UmlTerminalActivity : ComponentActivity() {
     private val main = Handler(Looper.getMainLooper())
 
     private var session: UmlPtySession? = null
+
+    @Volatile private var terminalCols = 80
+    @Volatile private var terminalRows = 24
 
     private var displayOutput:
         ((ByteArray, Int) -> Unit)? = null
@@ -218,7 +222,7 @@ class UmlTerminalActivity : ComponentActivity() {
 
         Thread {
             runCatching {
-                guest.start()
+                guest.start(terminalRows, terminalCols)
             }.fold(
                 onSuccess = {
                     main.post {
@@ -264,8 +268,14 @@ class UmlTerminalActivity : ComponentActivity() {
         }
 
         setContent {
+            val settings = remember {
+                getSharedPreferences("uml_settings", MODE_PRIVATE)
+            }
             var ram by remember {
-                mutableIntStateOf(2048)
+                mutableIntStateOf(settings.getInt("ram_mib", 2048))
+            }
+            LaunchedEffect(ram) {
+                settings.edit().putInt("ram_mib", ram).apply()
             }
 
             var font by remember {
@@ -287,10 +297,9 @@ class UmlTerminalActivity : ComponentActivity() {
                         session?.send(it)
                     },
                     onResize = { dims ->
-                        session?.resize(
-                            dims.columns,
-                            dims.rows
-                        )
+                        terminalCols = dims.columns.coerceAtLeast(1)
+                        terminalRows = dims.rows.coerceAtLeast(1)
+                        session?.resize(terminalCols, terminalRows)
                     },
                     onBell = {},
                     maxScrollbackLines = 10000,
@@ -320,6 +329,7 @@ class UmlTerminalActivity : ComponentActivity() {
                     Modifier
                         .fillMaxSize()
                         .background(dark)
+                        .imePadding()
                 ) {
                     Row(
                         Modifier
@@ -445,12 +455,15 @@ class UmlTerminalActivity : ComponentActivity() {
                             .weight(1f)
                             .fillMaxWidth()
                     ) {
-                        key(font) {
+
                             HavenTerminal(
                                 terminalEmulator = emulator,
                                 modifier = Modifier.fillMaxSize(),
                                 typeface = Typeface.MONOSPACE,
                                 initialFontSize = font.sp,
+                                onFontSizeChanged = { newSize ->
+                                    font = newSize.value.toInt().coerceIn(8, 28)
+                                },
                                 backgroundColor = dark,
                                 foregroundColor = fg,
                                 keyboardEnabled = true,
@@ -482,7 +495,7 @@ class UmlTerminalActivity : ComponentActivity() {
                                     }
                                 },
                             )
-                        }
+
                     }
 
                     Row(

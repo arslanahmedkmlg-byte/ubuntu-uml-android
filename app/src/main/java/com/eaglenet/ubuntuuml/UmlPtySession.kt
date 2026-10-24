@@ -49,7 +49,7 @@ class UmlPtySession(
     private var input: FileInputStream? = null
     private var writer: FileOutputStream? = null
 
-    fun start() {
+    fun start(rows: Int = 24, cols: Int = 80) {
         check(
             rootfs.isFile &&
             rootfs.length() > 128L * 1024L * 1024L
@@ -107,8 +107,8 @@ class UmlPtySession(
                 net,
                 argv,
                 env,
-                24,
-                80,
+                rows,
+                cols,
                 true
             )
         }.get()
