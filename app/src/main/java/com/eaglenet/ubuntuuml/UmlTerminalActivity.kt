@@ -281,6 +281,10 @@ class UmlTerminalActivity : ComponentActivity() {
             val dark = Color(0xff11131c)
             val fg = Color(0xffe2e6f3)
 
+            var terminalScrollController by remember {
+                mutableStateOf<org.connectbot.terminal.ScrollController?>(null)
+            }
+
             val emulator = remember {
                 TerminalEmulatorFactory.create(
                     autoDetectUrls = true,
@@ -460,6 +464,13 @@ class UmlTerminalActivity : ComponentActivity() {
                                 backgroundColor = dark,
                                 foregroundColor = fg,
                                 keyboardEnabled = true,
+                                reflowOnKeyboard = true,
+                                onScrollControllerAvailable = {
+                                    terminalScrollController = it
+                                },
+                                onImeVisibilityChanged = { visible ->
+                                    if (visible) terminalScrollController?.scrollToBottom()
+                                },
                                 onHyperlinkClick = { link ->
                                     val dest =
                                         if (link.contains("://")) {
