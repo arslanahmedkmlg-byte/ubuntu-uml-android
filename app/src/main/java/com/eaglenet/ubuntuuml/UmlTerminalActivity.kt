@@ -195,18 +195,19 @@ class UmlTerminalActivity : ComponentActivity() {
         }
     }
 
-    private fun boot(ram: Int) {
+    private fun boot(ram: Int, rootShell: Boolean = true) {
         if (running || importing || !diskReady) {
             return
         }
 
-        status = "Starting Ubuntu UML…"
+        status = if (rootShell) "Starting Ubuntu root shell…" else "Starting Ubuntu systemd…"
         running = true
 
         val guest = UmlPtySession(
             this,
             disk,
             ram,
+            rootShell = rootShell,
             output = { bytes, size ->
                 main.post {
                     displayOutput?.invoke(bytes, size)
@@ -229,8 +230,10 @@ class UmlTerminalActivity : ComponentActivity() {
             }.fold(
                 onSuccess = {
                     main.post {
-                        status =
-                            "UML launched · waiting for guest login"
+                        status = if (rootShell)
+                            "Ubuntu root shell · type commands below"
+                        else
+                            "Ubuntu systemd started · waiting for console login"
                     }
                 },
                 onFailure = { error ->
@@ -380,7 +383,14 @@ class UmlTerminalActivity : ComponentActivity() {
                                 boot(ramMiB)
                             }
                         ) {
-                            Text("Start")
+                            Text("Root shell")
+                        }
+
+                        OutlinedButton(
+                            enabled = diskReady && !running && !importing,
+                            onClick = { boot(ramMiB, rootShell = false) }
+                        ) {
+                            Text("Systemd")
                         }
 
                         OutlinedButton(
