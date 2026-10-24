@@ -26,9 +26,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
-      - name: Install UML native toolchain
+      - name: Verify preinstalled UML toolchain
         run: |
-          sdkmanager "ndk;29.0.14206865" "cmake;3.31.6"
+          test -d "$ANDROID_HOME/ndk/29.0.14206865"
+          test -x "$ANDROID_HOME/cmake/3.31.5/bin/cmake"
       - name: Download checksum-verified UML binaries
         run: UML_OUTPUT="$PWD/app/src/main/jniLibs" bash scripts/fetch-uml.sh
       - run: gradle --no-daemon :app:assembleDebug
