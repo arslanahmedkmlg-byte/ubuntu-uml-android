@@ -284,15 +284,7 @@ class UmlTerminalActivity : ComponentActivity() {
                 mutableIntStateOf(13)
             }
             val terminalFocus = remember { FocusRequester() }
-            val keyboard = LocalSoftwareKeyboardController.current
             var keyboardRequests by remember { mutableIntStateOf(0) }
-            LaunchedEffect(keyboardRequests) {
-                if (keyboardRequests > 0) {
-                    kotlinx.coroutines.delay(120)
-                    terminalFocus.requestFocus()
-                    keyboard?.show()
-                }
-            }
 
             val dark = Color(0xff11131c)
             val fg = Color(0xffe2e6f3)
@@ -488,11 +480,12 @@ class UmlTerminalActivity : ComponentActivity() {
                                 foregroundColor = fg,
                                 keyboardEnabled = true,
                                 showSoftKeyboard = true,
+                                imeRestoreTick = keyboardRequests,
                                 keyboardMode = HavenKeyboardMode.Standard,
                                 focusRequester = terminalFocus,
                                 onTerminalTap = {
                                     terminalFocus.requestFocus()
-                                    keyboard?.show()
+                                    keyboardRequests++
                                 },
                                 reflowOnKeyboard = true,
                                 onScrollControllerAvailable = {
