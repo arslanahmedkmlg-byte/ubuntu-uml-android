@@ -42,6 +42,9 @@ class UmlTerminalActivity : ComponentActivity() {
 
     private var session: UmlPtySession? = null
 
+    private var ramMiB by mutableIntStateOf(2048)
+
+
     @Volatile private var terminalCols = 80
     @Volatile private var terminalRows = 24
 
@@ -259,6 +262,9 @@ class UmlTerminalActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        ramMiB = getSharedPreferences("uml_settings", MODE_PRIVATE)
+            .getInt("ram_mib", 2048).coerceIn(512, 4096)
+
         diskReady =
             disk.isFile &&
             disk.length() > 128L * 1024L * 1024L
@@ -268,16 +274,6 @@ class UmlTerminalActivity : ComponentActivity() {
         }
 
         setContent {
-            val settings = remember {
-                getSharedPreferences("uml_settings", MODE_PRIVATE)
-            }
-            var ram by remember {
-                mutableIntStateOf(settings.getInt("ram_mib", 2048))
-            }
-            LaunchedEffect(ram) {
-                settings.edit().putInt("ram_mib", ram).apply()
-            }
-
             var font by remember {
                 mutableIntStateOf(13)
             }
@@ -377,7 +373,7 @@ class UmlTerminalActivity : ComponentActivity() {
                                 !running &&
                                 !importing,
                             onClick = {
-                                boot(ram)
+                                boot(ramMiB)
                             }
                         ) {
                             Text("Start")
@@ -428,15 +424,12 @@ class UmlTerminalActivity : ComponentActivity() {
                         OutlinedButton(
                             enabled = !running,
                             onClick = {
-                                ram =
-                                    if (ram >= 4096) {
-                                        512
-                                    } else {
-                                        ram + 512
-                                    }
+                                ramMiB = if (ramMiB >= 4096) 512 else ramMiB + 512
+                                getSharedPreferences("uml_settings", MODE_PRIVATE)
+                                    .edit().putInt("ram_mib", ramMiB).apply()
                             }
                         ) {
-                            Text("RAM ${ram}M")
+                            Text("RAM ${ramMiB}M")
                         }
                     }
 
@@ -553,6 +546,14 @@ class UmlTerminalActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!running) {
+            ramMiB = getSharedPreferences("uml_settings", MODE_PRIVATE)
+                .getInt("ram_mib", 2048).coerceIn(512, 4096)
         }
     }
 
