@@ -20,7 +20,7 @@ for p in "${required[@]}"; do
   test -e "$MNT$p" || { echo "MISSING IN EXT4: $p" >&2; exit 1; }
 done
 packages=(systemd-sysv udev systemd-resolved systemd-timesyncd dbus login passwd
- util-linux iproute2 iputils-ping ca-certificates curl wget dnsutils procps git openssh-client)
+ util-linux iproute2 iputils-ping ca-certificates curl wget bind9-dnsutils procps git openssh-client)
 for pkg in "${packages[@]}"; do
   dpkg-query --admindir="$MNT/var/lib/dpkg" -W -f='${Status}' "$pkg" 2>/dev/null | grep -qx "install ok installed" || {
     echo "PACKAGE MISSING/UNCONFIGURED: $pkg" >&2; exit 1;
