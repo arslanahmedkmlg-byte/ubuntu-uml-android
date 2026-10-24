@@ -1,5 +1,10 @@
 name: Build Ubuntu ARM64 rootfs candidate
 on:
+  pull_request:
+    paths:
+      - 'scripts/build-ubuntu-rootfs.sh'
+      - 'scripts/check-rootfs-image.sh'
+      - '.github/workflows/rootfs-candidate.yml'
   workflow_dispatch:
     inputs:
       ubuntu_release:
@@ -23,18 +28,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build candidate image
         env:
-          UBUNTU_RELEASE: ${{ inputs.ubuntu_release }}
-          DISK_SIZE_MIB: ${{ inputs.disk_size_mib }}
+          UBUNTU_RELEASE: ${{ inputs.ubuntu_release || 'noble' }}
+          DISK_SIZE_MIB: ${{ inputs.disk_size_mib || '2048' }}
           OUT_DIR: ${{ github.workspace }}/out
           WORK_DIR: ${{ github.workspace }}/.work
         run: sudo -E ./scripts/build-ubuntu-rootfs.sh
       - name: Validate actual ext4 filesystem and Ubuntu services
-        run: sudo ./scripts/check-rootfs-image.sh out/ubuntu-${{ inputs.ubuntu_release }}-arm64.ext4
+        run: sudo ./scripts/check-rootfs-image.sh out/ubuntu-${{ inputs.ubuntu_release || 'noble' }}-arm64.ext4
       - uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-${{ inputs.ubuntu_release }}-arm64-ext4-baseline-v2
+          name: ubuntu-${{ inputs.ubuntu_release || 'noble' }}-arm64-ext4-baseline-v2
           path: |
-            out/ubuntu-${{ inputs.ubuntu_release }}-arm64.ext4
-            out/ubuntu-${{ inputs.ubuntu_release }}-arm64.ext4.sha256
+            out/ubuntu-${{ inputs.ubuntu_release || 'noble' }}-arm64.ext4
+            out/ubuntu-${{ inputs.ubuntu_release || 'noble' }}-arm64.ext4.sha256
           if-no-files-found: error
           retention-days: 7
