@@ -4,10 +4,23 @@ plugins {
 }
 
 android {
+    ndkVersion = "29.0.14206865"
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.31.6"
+        }
+    }
+
     namespace = "com.eaglenet.ubuntuuml"
     compileSdk = 37
 
     defaultConfig {
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+
         applicationId = "com.eaglenet.ubuntuuml"
         minSdk = 28
         targetSdk = 28
