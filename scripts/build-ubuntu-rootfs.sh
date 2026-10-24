@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a minimal Ubuntu ARM64 rootfs and a 2 GiB ext4 disk image.
 # Intended for a disposable Ubuntu GitHub Actions runner, not Android/Termux.
-# This produces a candidate image only; UML boot compatibility must be tested separately.
+# Full guest-service baseline: offline-checked before release, on-device UML still required.
 set -Eeuo pipefail
 
 RELEASE="${UBUNTU_RELEASE:-noble}"
@@ -70,8 +70,45 @@ cp --dereference /etc/resolv.conf "$ROOT/etc/resolv.conf"
 # Keep the guest small but usable. Package availability is tested at image build time.
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  systemd-sysv dbus sudo bash ca-certificates curl wget iproute2 iputils-ping \
-   netbase dnsutils vim-tiny less locales tzdata apt-transport-https
+  systemd-sysv systemd-resolved systemd-timesyncd udev dbus sudo bash ca-certificates curl wget iproute2 iputils-ping \
+  netbase dnsutils vim-tiny less locales tzdata apt-transport-https util-linux login passwd procps kmod e2fsprogs git openssh-client
+# Required UML guest configuration: vec0 is the L2 transport to passt.
+# systemd-networkd waits for udev initialization; install udev above.
+install -d -m 0755 "$ROOT/etc/systemd/network"
+cat > "$ROOT/etc/systemd/network/20-uml-vec0.network" <<'NETWORK'
+[Match]
+Name=vec0
+
+[Network]
+DHCP=ipv4
+IPv6AcceptRA=yes
+
+[DHCPv4]
+UseDNS=yes
+UseRoutes=yes
+NETWORK
+
+# Single-user local console autologin; never expose this guest over remote SSH.
+# The root password remains locked; this is restricted to the local UML console.
+install -d -m 0755 "$ROOT/etc/systemd/system/console-getty.service.d"
+cat > "$ROOT/etc/systemd/system/console-getty.service.d/10-uml-autologin.conf" <<'GETTY'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud 115200,38400,9600 console vt102
+GETTY
+install -d -m 0755 "$ROOT/etc/systemd/system/getty.target.wants"
+ln -sfn /usr/lib/systemd/system/console-getty.service "$ROOT/etc/systemd/system/getty.target.wants/console-getty.service"
+
+# Configure services while the guest is offline.
+systemctl --root="$ROOT" enable systemd-networkd.service
+systemctl --root="$ROOT" enable systemd-resolved.service
+systemctl --root="$ROOT" enable systemd-timesyncd.service
+
+# Execute the ARM64 userspace under qemu-user before packing the disk.
+chroot "$ROOT" /usr/bin/udevadm --version
+chroot "$ROOT" /usr/bin/networkctl --version
+chroot "$ROOT" /usr/bin/resolvectl --version
+chroot "$ROOT" /usr/bin/bash -c 'test -x /usr/lib/systemd/systemd-udevd && test -x /sbin/agetty && test -x /usr/bin/apt-get'
 chroot "$ROOT" apt-get clean
 # Restore the normal Ubuntu resolver symlink; runtime DNS is supplied by passt.
 rm -f "$ROOT/etc/resolv.conf"
@@ -98,4 +135,4 @@ test -x "$ROOT/bin/sh"
 test -x "$ROOT/usr/bin/apt-get"
 sha256sum "$IMG" | tee "$IMG.sha256"
 echo "Candidate image: $IMG"
-echo "NOTE: boot under ARM64 UML and test networking/APT/persistence before release."
+echo "ON-DEVICE ACCEPTANCE STILL REQUIRED: UML boot, DHCP, DNS, APT, persistent changes."
