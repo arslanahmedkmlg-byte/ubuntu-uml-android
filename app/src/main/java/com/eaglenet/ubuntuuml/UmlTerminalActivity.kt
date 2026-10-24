@@ -24,9 +24,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
 import org.connectbot.terminal.TerminalEmulatorFactory
 import sh.haven.core.terminal.HavenTerminal
+import sh.haven.core.terminal.HavenKeyboardMode
 
 import java.io.*
 import java.util.zip.GZIPInputStream
@@ -280,6 +283,16 @@ class UmlTerminalActivity : ComponentActivity() {
             var font by remember {
                 mutableIntStateOf(13)
             }
+            val terminalFocus = remember { FocusRequester() }
+            val keyboard = LocalSoftwareKeyboardController.current
+            var keyboardRequests by remember { mutableIntStateOf(0) }
+            LaunchedEffect(keyboardRequests) {
+                if (keyboardRequests > 0) {
+                    kotlinx.coroutines.delay(120)
+                    terminalFocus.requestFocus()
+                    keyboard?.show()
+                }
+            }
 
             val dark = Color(0xff11131c)
             val fg = Color(0xffe2e6f3)
@@ -474,6 +487,13 @@ class UmlTerminalActivity : ComponentActivity() {
                                 backgroundColor = dark,
                                 foregroundColor = fg,
                                 keyboardEnabled = true,
+                                showSoftKeyboard = true,
+                                keyboardMode = HavenKeyboardMode.Standard,
+                                focusRequester = terminalFocus,
+                                onTerminalTap = {
+                                    terminalFocus.requestFocus()
+                                    keyboard?.show()
+                                },
                                 reflowOnKeyboard = true,
                                 onScrollControllerAvailable = {
                                     terminalScrollController = it
@@ -522,6 +542,10 @@ class UmlTerminalActivity : ComponentActivity() {
                         horizontalArrangement =
                             Arrangement.spacedBy(4.dp)
                     ) {
+                        TextButton(onClick = { keyboardRequests++ }) {
+                            Text("⌨ Keyboard", color = Color(0xffc3b2ff))
+                        }
+
                         val keys = listOf(
                             "ESC" to "\u001b",
                             "TAB" to "\t",
