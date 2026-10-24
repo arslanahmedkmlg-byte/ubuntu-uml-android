@@ -17,6 +17,7 @@ class UmlPtySession(
     private val context: Context,
     private val rootfs: File,
     private val ramMiB: Int,
+    private val rootShell: Boolean = false,
     private val output: (ByteArray, Int) -> Unit,
     private val exited: (Int) -> Unit,
 ) : Closeable {
@@ -92,6 +93,10 @@ class UmlPtySession(
             "rw",
             "stub_exe=$stub",
             "hostfs=${share.absolutePath}",
+            "con=none",
+            "con0=fd:0,fd:1",
+            "console=tty0",
+            *(if (rootShell) arrayOf("init=/bin/bash") else arrayOf("systemd.wants=console-getty.service")),
         )
 
         val env = arrayOf(
