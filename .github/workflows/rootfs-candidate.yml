@@ -1,0 +1,40 @@
+name: Build Ubuntu ARM64 rootfs candidate
+on:
+  workflow_dispatch:
+    inputs:
+      ubuntu_release:
+        description: Ubuntu series (noble = 24.04 LTS)
+        required: true
+        default: noble
+        type: choice
+        options: [noble, jammy]
+      disk_size_mib:
+        description: Virtual disk size in MiB
+        required: true
+        default: '2048'
+        type: string
+permissions:
+  contents: read
+jobs:
+  rootfs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build candidate image
+        env:
+          UBUNTU_RELEASE: ${{ inputs.ubuntu_release }}
+          DISK_SIZE_MIB: ${{ inputs.disk_size_mib }}
+          OUT_DIR: ${{ github.workspace }}/out
+          WORK_DIR: ${{ github.workspace }}/.work
+        run: sudo -E ./scripts/build-ubuntu-rootfs.sh
+      - name: Structural checks
+        run: ./scripts/check-rootfs-image.sh out/ubuntu-${{ inputs.ubuntu_release }}-arm64.ext4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-${{ inputs.ubuntu_release }}-arm64-ext4-candidate
+          path: |
+            out/ubuntu-${{ inputs.ubuntu_release }}-arm64.ext4
+            out/ubuntu-${{ inputs.ubuntu_release }}-arm64.ext4.sha256
+          if-no-files-found: error
+          retention-days: 7
