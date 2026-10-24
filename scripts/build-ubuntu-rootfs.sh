@@ -71,7 +71,7 @@ cp --dereference /etc/resolv.conf "$ROOT/etc/resolv.conf"
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   systemd-sysv dbus sudo bash ca-certificates curl wget iproute2 iputils-ping \
-  isc-dhcp-client netbase dnsutils vim-tiny less locales tzdata apt-transport-https
+   netbase dnsutils vim-tiny less locales tzdata apt-transport-https
 chroot "$ROOT" apt-get clean
 # Restore the normal Ubuntu resolver symlink; runtime DNS is supplied by passt.
 rm -f "$ROOT/etc/resolv.conf"
