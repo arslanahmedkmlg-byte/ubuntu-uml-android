@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a minimal Ubuntu ARM64 rootfs and a 2 GiB ext4 disk image.
-# Intended for a disposable Ubuntu GitHub Actions runner, not Android/Termux.
+# Intended for a native ARM64 Ubuntu GitHub Actions runner, not Android/Termux.
 # This produces a candidate image only; UML boot compatibility must be tested separately.
 set -Eeuo pipefail
 
@@ -20,23 +20,20 @@ if ! [[ "$SIZE_MIB" =~ ^[0-9]+$ ]] || (( SIZE_MIB < 1024 )); then
   echo "DISK_SIZE_MIB must be an integer >= 1024." >&2
   exit 2
 fi
+if [[ "$(dpkg --print-architecture)" != "$ARCH" ]]; then
+  echo "This build must run natively on $ARCH; QEMU cross-architecture builds are unsupported." >&2
+  exit 2
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends debootstrap qemu-user-static binfmt-support e2fsprogs ca-certificates util-linux
+apt-get install -y --no-install-recommends debootstrap e2fsprogs ca-certificates util-linux
 mkdir -p "$OUT" "$WORK"
 if mountpoint -q "$ROOT"; then umount -lf "$ROOT"; fi
 rm -rf "$ROOT" "$IMG"
 mkdir -p "$ROOT"
 
-# Cross-architecture debootstrap uses qemu-user-static on x86_64 runners.
-if [[ "$(dpkg --print-architecture)" == "arm64" ]]; then
-  debootstrap --arch="$ARCH" --variant=minbase "$RELEASE" "$ROOT" http://ports.ubuntu.com/ubuntu-ports
-else
-  debootstrap --foreign --arch="$ARCH" --variant=minbase "$RELEASE" "$ROOT" http://ports.ubuntu.com/ubuntu-ports
-  install -D -m 0755 /usr/bin/qemu-aarch64-static "$ROOT/usr/bin/qemu-aarch64-static"
-  chroot "$ROOT" /debootstrap/debootstrap --second-stage
-fi
+debootstrap --arch="$ARCH" --variant=minbase "$RELEASE" "$ROOT" http://ports.ubuntu.com/ubuntu-ports
 
 # Essential guest defaults; systemd and networking behavior still need UML testing.
 cat > "$ROOT/etc/hostname" <<'HOSTNAME'
@@ -70,14 +67,67 @@ cp --dereference /etc/resolv.conf "$ROOT/etc/resolv.conf"
 # Keep the guest small but usable. Package availability is tested at image build time.
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  systemd-sysv dbus sudo bash ca-certificates curl wget iproute2 iputils-ping \
-   netbase dnsutils vim-tiny less locales tzdata apt-transport-https
+  systemd-sysv systemd-resolved dbus sudo bash ca-certificates \
+  curl wget iproute2 iputils-ping netbase dnsutils vim-tiny less locales tzdata \
+  apt-transport-https
 chroot "$ROOT" apt-get clean
-# Restore the normal Ubuntu resolver symlink; runtime DNS is supplied by passt.
+
+# UML's vector transport creates vec0. passt's forced local mode supplies its
+# DHCP address, gateway, and DNS; networkd retries DHCP as the device appears.
+mkdir -p "$ROOT/etc/systemd/network"
+cat > "$ROOT/etc/systemd/network/10-loopback.network" <<'NETWORK'
+[Match]
+Name=lo
+
+[Network]
+Address=127.0.0.1/8
+Address=::1/128
+LinkLocalAddressing=no
+ConfigureWithoutCarrier=yes
+NETWORK
+cat > "$ROOT/etc/systemd/network/20-uml-vec.network" <<'NETWORK'
+[Match]
+Name=vec0
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+DHCP=yes
+IPv6AcceptRA=yes
+
+[DHCPv4]
+UseDNS=yes
+UseRoutes=yes
+
+[DHCPv6]
+UseDNS=yes
+NETWORK
+systemctl --root="$ROOT" enable \
+  systemd-networkd.service systemd-resolved.service dbus.service
+
+mkdir -p "$ROOT/etc/systemd/resolved.conf.d"
+cat > "$ROOT/etc/systemd/resolved.conf.d/10-ubuntu-uml.conf" <<'RESOLVED'
+[Resolve]
+DNSStubListener=yes
+FallbackDNS=1.1.1.1 2606:4700:4700::1111
+RESOLVED
+
+# passt advertises its configured DNS server (1.1.1.1 by default) over DHCP.
+# resolved consumes that per-link server and serves local clients via this stub.
 rm -f "$ROOT/etc/resolv.conf"
 ln -s ../run/systemd/resolve/stub-resolv.conf "$ROOT/etc/resolv.conf"
 rm -rf "$ROOT/var/lib/apt/lists/"* "$ROOT/var/cache/apt/archives/"*.deb
-rm -f "$ROOT/usr/bin/qemu-aarch64-static"
+
+test -s "$ROOT/etc/systemd/network/10-loopback.network"
+test -s "$ROOT/etc/systemd/network/20-uml-vec.network"
+grep -Fxq 'Name=vec0' "$ROOT/etc/systemd/network/20-uml-vec.network"
+grep -Fxq 'DHCP=yes' "$ROOT/etc/systemd/network/20-uml-vec.network"
+test -L "$ROOT/etc/systemd/system/multi-user.target.wants/systemd-networkd.service"
+test -L "$ROOT/etc/systemd/system/multi-user.target.wants/systemd-resolved.service"
+test -L "$ROOT/etc/systemd/system/multi-user.target.wants/dbus.service"
+test "$(readlink "$ROOT/etc/resolv.conf")" = ../run/systemd/resolve/stub-resolv.conf
+test -s "$ROOT/etc/systemd/resolved.conf.d/10-ubuntu-uml.conf"
 
 # Create a filesystem image; no loop mount is needed for population.
 truncate -s "${SIZE_MIB}M" "$IMG"
@@ -96,6 +146,6 @@ file "$IMG"
 test -x "$ROOT/sbin/init"
 test -x "$ROOT/bin/sh"
 test -x "$ROOT/usr/bin/apt-get"
-sha256sum "$IMG" | tee "$IMG.sha256"
+(cd "$OUT" && sha256sum "$(basename "$IMG")" | tee "$(basename "$IMG").sha256")
 echo "Candidate image: $IMG"
 echo "NOTE: boot under ARM64 UML and test networking/APT/persistence before release."

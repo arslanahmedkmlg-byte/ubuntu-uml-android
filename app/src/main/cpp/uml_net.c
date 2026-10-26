@@ -113,6 +113,9 @@ static void child_exec_passt(const char *passt, const char *log_path,
 	/* If Haven dies, passt must not outlive it. */
 	prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0);
 	setenv("PASST_RAW_L2", "1", 1);
+	/* Android cannot expose host interfaces to passt; use its stable local
+	 * DHCP network and gateway-to-loopback mapping for the UML guest. */
+	setenv("PASST_FORCE_LOCAL", "1", 1);
 
 	const char *gw = getenv("PASST_GW");
 	const char *dns_env = getenv("PASST_DNS");
