@@ -2,11 +2,13 @@ package com.eaglenet.ubuntuuml
 
 import android.content.Context
 import android.os.ParcelFileDescriptor
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import sh.haven.core.local.PtyBridge
 import java.io.Closeable
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.Executors
 
 /**
@@ -17,8 +19,10 @@ class UmlPtySession(
     private val context: Context,
     private val rootfs: File,
     private val ramMiB: Int,
+    private val rootShell: Boolean,
     private val output: (ByteArray, Int) -> Unit,
     private val exited: (Int) -> Unit,
+    private val failed: (String) -> Unit,
 ) : Closeable {
 
     companion object {
@@ -28,6 +32,17 @@ class UmlPtySession(
                     isDaemon = true
                 }
             }
+
+        fun nativeRuntimeAvailable(context: Context): Boolean {
+            val libs = File(context.applicationInfo.nativeLibraryDir)
+            return listOf(
+                "libuml-net.so",
+                "libuml-passt.so",
+                "libvmlinux.so",
+                "libuml-stub.so",
+                "libpty_bridge.so",
+            ).all { File(libs, it).isFile }
+        }
     }
 
     private val writeWorker =
@@ -46,10 +61,22 @@ class UmlPtySession(
     @Volatile
     private var processPid = -1
 
-    private var input: FileInputStream? = null
-    private var writer: FileOutputStream? = null
+    private val lifecycleLock = Any()
+    private var readerFinished = false
+    private var input: ParcelFileDescriptor.AutoCloseInputStream? = null
+    private var writer: ParcelFileDescriptor.AutoCloseOutputStream? = null
+    private val inputQueue = PtyInputQueue(
+        executor = writeWorker,
+        isClosed = { closed },
+        write = { bytes ->
+            writer?.write(bytes)
+            writer?.flush()
+        },
+        failed = failed,
+    )
 
     fun start(rows: Int = 24, cols: Int = 80) {
+        check(!closed) { "UML session is already closed" }
         check(
             rootfs.isFile &&
             rootfs.length() > 128L * 1024L * 1024L
@@ -86,12 +113,13 @@ class UmlPtySession(
             passt,
             passtLog.absolutePath,
             kernel,
-            "mem=${ramMiB}M",
-            "ubd0=${rootfs.absolutePath}",
-            "root=/dev/ubda",
-            "rw",
-            "stub_exe=$stub",
-            "hostfs=${share.absolutePath}",
+            *buildUmlKernelCommandLine(
+                rootfs,
+                ramMiB,
+                File(stub),
+                share,
+                rootShell = rootShell,
+            ),
         )
 
         val env = arrayOf(
@@ -113,89 +141,152 @@ class UmlPtySession(
             )
         }.get()
 
-        check(response.size == 2 && response[0] >= 0) {
+        check(response.size == 2 && response[0] >= 0 && response[1] > 0) {
             "UML forkpty failed (errno=${response.getOrNull(1)})"
         }
 
-        processPid = response[1]
-
+        val childPid = response[1]
         val master = ParcelFileDescriptor.adoptFd(response[0])
-        pfd = master
+        val inputPfd = try {
+            ParcelFileDescriptor.dup(master.fileDescriptor)
+        } catch (error: IOException) {
+            killChild(childPid)
+            closeDescriptor(master)
+            PtyBridge.nativeWaitPid(childPid)
+            throw error
+        }
+        val writerPfd = try {
+            ParcelFileDescriptor.dup(master.fileDescriptor)
+        } catch (error: IOException) {
+            killChild(childPid)
+            closeDescriptor(inputPfd)
+            closeDescriptor(master)
+            PtyBridge.nativeWaitPid(childPid)
+            throw error
+        }
+        val childInput = ParcelFileDescriptor.AutoCloseInputStream(inputPfd)
+        val childWriter = ParcelFileDescriptor.AutoCloseOutputStream(writerPfd)
 
-        input = FileInputStream(master.fileDescriptor)
-        writer = FileOutputStream(master.fileDescriptor)
+        synchronized(lifecycleLock) {
+            if (closed) {
+                killChild(childPid)
+                closeDescriptor(childInput)
+                closeDescriptor(childWriter)
+                closeDescriptor(master)
+                PtyBridge.nativeWaitPid(childPid)
+                return
+            }
+            processPid = childPid
+            pfd = master
+            input = childInput
+            writer = childWriter
+        }
 
-        Thread({
+        val reader = Thread({
             val buf = ByteArray(8192)
 
             try {
                 while (!closed) {
-                    val size = input?.read(buf) ?: -1
+                    val size = childInput.read(buf)
 
                     if (size <= 0) break
 
                     output(buf.copyOf(size), size)
                 }
-            } catch (_: Exception) {
-                // Closing the PTY unblocks its reader.
-            } finally {
+            } catch (error: IOException) {
                 if (!closed) {
-                    val code = runCatching {
-                        PtyBridge.nativeWaitPid(processPid)
-                    }.getOrDefault(-1)
-
-                    exited(code)
+                    synchronized(lifecycleLock) {
+                        if (processPid > 0 && !readerFinished) {
+                            killChild(processPid)
+                        }
+                    }
+                    failed("UML console read failed: ${error.message}")
                 }
+            } finally {
+                synchronized(lifecycleLock) {
+                    readerFinished = true
+                }
+                val code = PtyBridge.nativeWaitPid(childPid)
+                val notifyExit = synchronized(lifecycleLock) {
+                    processPid = -1
+                    if (closed) {
+                        false
+                    } else {
+                        closed = true
+                        true
+                    }
+                }
+                closeResources()
+                if (notifyExit) exited(code)
             }
         }, "uml-pty-reader").apply {
             isDaemon = true
-        }.start()
+        }
+        try {
+            reader.start()
+        } catch (error: RuntimeException) {
+            close()
+            PtyBridge.nativeWaitPid(childPid)
+            throw error
+        }
     }
 
     fun send(bytes: ByteArray) {
-        if (closed) return
-
-        runCatching {
-            writeWorker.execute {
-                if (!closed) {
-                    runCatching {
-                        writer?.write(bytes)
-                        writer?.flush()
-                    }
-                }
-            }
-        }
+        inputQueue.send(bytes)
     }
 
     fun resize(cols: Int, rows: Int) {
         if (!closed) {
             pfd?.let {
-                runCatching {
-                    PtyBridge.nativeSetSize(
+                val size = ptyWindowSize(cols, rows)
+                if (PtyBridge.nativeSetSize(
                         it.fd,
-                        rows.coerceAtLeast(1),
-                        cols.coerceAtLeast(1)
-                    )
+                        size.rows,
+                        size.columns,
+                    ) != 0 && !closed
+                ) {
+                    failed("Could not resize the UML console")
                 }
             }
         }
     }
 
     override fun close() {
-        if (closed) return
-
-        closed = true
-
-        if (processPid > 0) {
-            runCatching {
-                android.os.Process.killProcess(processPid)
+        synchronized(lifecycleLock) {
+            if (closed) return
+            closed = true
+            if (processPid > 0 && !readerFinished) {
+                killChild(processPid)
             }
         }
 
-        runCatching { input?.close() }
-        runCatching { writer?.close() }
-        runCatching { pfd?.close() }
+        closeResources()
+    }
+
+    private fun closeResources() {
+        input?.let(::closeDescriptor)
+        writer?.let(::closeDescriptor)
+        pfd?.let(::closeDescriptor)
 
         writeWorker.shutdownNow()
+    }
+
+    private fun closeDescriptor(descriptor: java.io.Closeable) {
+        try {
+            descriptor.close()
+        } catch (_: IOException) {
+            // Shutdown closes several duplicated PTY descriptors at once.
+        }
+    }
+
+    private fun killChild(pid: Int) {
+        try {
+            Os.kill(-pid, OsConstants.SIGKILL)
+        } catch (error: ErrnoException) {
+            if (error.errno != OsConstants.ESRCH) {
+                android.os.Process.killProcess(pid)
+                failed("Could not stop the UML process group: ${error.message}")
+            }
+        }
     }
 }

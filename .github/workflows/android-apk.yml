@@ -32,6 +32,14 @@ jobs:
           test -x "$ANDROID_HOME/cmake/3.31.5/bin/cmake"
       - name: Download checksum-verified UML binaries
         run: UML_OUTPUT="$PWD/app/src/main/jniLibs" bash scripts/fetch-uml.sh
+      - name: Run terminal and VM regression tests
+        run: |
+          gradle --no-daemon -p third_party/termlib :lib:testDebugUnitTest \
+            --tests org.connectbot.terminal.KeyboardHandlerTest \
+            --tests org.connectbot.terminal.ImeInputViewTest \
+            --tests org.connectbot.terminal.ResizeReflowTest \
+            --tests org.connectbot.terminal.TerminalLifetimeTest
+          gradle --no-daemon :app:testDebugUnitTest
       - run: gradle --no-daemon :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:

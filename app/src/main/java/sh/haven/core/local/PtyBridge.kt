@@ -12,6 +12,8 @@ object PtyBridge {
 
     /**
      * Fork a child process with a pseudoterminal.
+     * This PTY belongs to Android's host process; UML's guest console and
+     * guest controlling terminal are configured separately in its arguments.
      * @param raw raw-mode pty (cfmakeraw) instead of the default cooked
      *   termios — used by the UML guest console, which implements its own
      *   tty semantics inside the guest (a cooked host pty turns \r into \n

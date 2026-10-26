@@ -67,7 +67,12 @@ Java_sh_haven_core_local_PtyBridge_nativeForkPty(
     int masterFd;
     struct termios rawTio;
     if (jRaw) {
+        /* cfmakeraw changes selected fields; initialize the rest deterministically. */
+        memset(&rawTio, 0, sizeof(rawTio));
         cfmakeraw(&rawTio);
+        rawTio.c_cflag |= CLOCAL | CREAD;
+        rawTio.c_cc[VMIN] = 1;
+        rawTio.c_cc[VTIME] = 0;
     }
     pid_t pid = forkpty(&masterFd, NULL, jRaw ? &rawTio : NULL, &ws);
 
@@ -75,8 +80,13 @@ Java_sh_haven_core_local_PtyBridge_nativeForkPty(
         LOGE("forkpty failed: %s", strerror(errno));
         buf[0] = -1; buf[1] = errno;
     } else if (pid == 0) {
-        /* Child process */
-        setsid();
+        /*
+         * forkpty() has already created a session, made this process its
+         * leader, and assigned the slave as its controlling terminal.
+         * Calling setsid() again fails with EPERM and cannot establish a
+         * guest-side controlling terminal; UML's guest console is configured
+         * separately by the kernel command line.
+         */
         execve(cmd, argv, envp);
         /* If execve returns, it failed */
         LOGE("execve(%s) failed: %s", cmd, strerror(errno));
@@ -128,7 +138,11 @@ Java_sh_haven_core_local_PtyBridge_nativeWaitPid(
     JNIEnv *env, jclass cls, jint pid)
 {
     int status;
-    if (waitpid(pid, &status, 0) < 0) return -1;
+    pid_t result;
+    do {
+        result = waitpid(pid, &status, 0);
+    } while (result < 0 && errno == EINTR);
+    if (result < 0) return -1;
     if (WIFEXITED(status)) return WEXITSTATUS(status);
     if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
     return -1;

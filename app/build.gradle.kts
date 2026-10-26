@@ -45,4 +45,5 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.foundation:foundation")
+    testImplementation("junit:junit:4.13.2")
 }
