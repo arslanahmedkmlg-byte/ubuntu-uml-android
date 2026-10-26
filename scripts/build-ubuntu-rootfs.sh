@@ -66,7 +66,8 @@ cp --dereference /etc/resolv.conf "$ROOT/etc/resolv.conf"
 
 # Keep the guest small but usable. Package availability is tested at image build time.
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
-chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get \
+  -o Dpkg::Use-Pty=0 install -y --no-install-recommends \
   systemd-sysv systemd-resolved dbus sudo bash ca-certificates \
   curl wget iproute2 iputils-ping netbase dnsutils vim-tiny less locales tzdata \
   apt-transport-https
@@ -105,6 +106,7 @@ UseDNS=yes
 NETWORK
 systemctl --root="$ROOT" enable \
   systemd-networkd.service systemd-resolved.service dbus.service
+systemctl --root="$ROOT" disable systemd-networkd-wait-online.service
 
 mkdir -p "$ROOT/etc/systemd/resolved.conf.d"
 cat > "$ROOT/etc/systemd/resolved.conf.d/10-ubuntu-uml.conf" <<'RESOLVED'
@@ -123,9 +125,18 @@ test -s "$ROOT/etc/systemd/network/10-loopback.network"
 test -s "$ROOT/etc/systemd/network/20-uml-vec.network"
 grep -Fxq 'Name=vec0' "$ROOT/etc/systemd/network/20-uml-vec.network"
 grep -Fxq 'DHCP=yes' "$ROOT/etc/systemd/network/20-uml-vec.network"
-test -L "$ROOT/etc/systemd/system/multi-user.target.wants/systemd-networkd.service"
-test -L "$ROOT/etc/systemd/system/multi-user.target.wants/systemd-resolved.service"
-test -L "$ROOT/etc/systemd/system/multi-user.target.wants/dbus.service"
+service_enabled() {
+  find "$ROOT/etc/systemd/system" "$ROOT/usr/lib/systemd/system" \
+    -type l -path "*/wants/$1" -print -quit | grep -q .
+}
+service_enabled systemd-networkd.service
+service_enabled systemd-resolved.service
+service_enabled dbus.service
+if find "$ROOT/etc/systemd/system" "$ROOT/usr/lib/systemd/system" \
+  -type l -path '*/wants/systemd-networkd-wait-online.service' -print -quit | grep -q .; then
+  echo "networkd-wait-online must stay disabled for the late-arriving UML interface." >&2
+  exit 1
+fi
 test "$(readlink "$ROOT/etc/resolv.conf")" = ../run/systemd/resolve/stub-resolv.conf
 test -s "$ROOT/etc/systemd/resolved.conf.d/10-ubuntu-uml.conf"
 

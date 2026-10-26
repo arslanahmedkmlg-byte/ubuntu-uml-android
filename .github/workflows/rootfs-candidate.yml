@@ -7,6 +7,13 @@ on:
       - 'app/src/main/cpp/uml_net.c'
       - 'scripts/build-ubuntu-rootfs.sh'
       - 'scripts/check-rootfs-image.sh'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rootfs-candidate.yml'
+      - 'app/src/main/cpp/uml_net.c'
+      - 'scripts/build-ubuntu-rootfs.sh'
+      - 'scripts/check-rootfs-image.sh'
   workflow_dispatch:
     inputs:
       ubuntu_release:

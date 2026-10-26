@@ -48,7 +48,8 @@ require_file() {
   }
 }
 require_enabled() {
-  [[ -L "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants/$1" ]] || {
+  find "$MOUNT_DIR/etc/systemd/system" "$MOUNT_DIR/usr/lib/systemd/system" \
+    -type l -path "*/wants/$1" -print -quit | grep -q . || {
     echo "Required systemd service is not enabled: $1" >&2
     exit 1
   }
@@ -94,6 +95,11 @@ grep -Fxq 'UseRoutes=yes' "$VEC"
 require_enabled systemd-networkd.service
 require_enabled systemd-resolved.service
 require_enabled dbus.service
+if find "$MOUNT_DIR/etc/systemd/system" "$MOUNT_DIR/usr/lib/systemd/system" \
+  -type l -path '*/wants/systemd-networkd-wait-online.service' -print -quit | grep -q .; then
+  echo "networkd-wait-online must be disabled so a late UML interface cannot block startup." >&2
+  exit 1
+fi
 
 [[ -L "$MOUNT_DIR/etc/resolv.conf" ]]
 [[ "$(readlink "$MOUNT_DIR/etc/resolv.conf")" == ../run/systemd/resolve/stub-resolv.conf ]]
