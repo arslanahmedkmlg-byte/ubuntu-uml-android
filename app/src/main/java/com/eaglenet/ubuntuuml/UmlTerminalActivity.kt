@@ -553,7 +553,7 @@ class UmlTerminalActivity : ComponentActivity() {
                                 keyboardEnabled = vmState.consoleReady,
                                 showSoftKeyboard = vmState.consoleReady,
                                 imeRestoreTick = keyboardRestoreTick,
-                                keyboardMode = HavenKeyboardMode.Standard,
+                                keyboardMode = HavenKeyboardMode.Secure,
                                 focusRequester = terminalFocus,
                                 onTerminalTap = {
                                     terminalFocus.requestFocus()
