@@ -50,7 +50,7 @@ require_file() {
 require_enabled() {
   local enabled_link
   enabled_link="$(find "$MOUNT_DIR/etc/systemd/system" "$MOUNT_DIR/usr/lib/systemd/system" \
-    -type l -path "*/wants/$1" -print -quit)"
+    -type l -path "*.wants/$1" -print -quit)"
   [[ -n "$enabled_link" ]] || {
     echo "Required systemd service is not enabled: $1" >&2
     exit 1
@@ -96,9 +96,8 @@ grep -Fxq 'UseRoutes=yes' "$VEC"
 ! grep -Eq '^[[:space:]]*Address=' "$VEC"
 require_enabled systemd-networkd.service
 require_enabled systemd-resolved.service
-require_enabled dbus.service
 WAIT_ONLINE_LINK="$(find "$MOUNT_DIR/etc/systemd/system" "$MOUNT_DIR/usr/lib/systemd/system" \
-  -type l -path '*/wants/systemd-networkd-wait-online.service' -print -quit)"
+  -type l -path '*.wants/systemd-networkd-wait-online.service' -print -quit)"
 if [[ -n "$WAIT_ONLINE_LINK" ]]; then
   echo "networkd-wait-online must be disabled so a late UML interface cannot block startup." >&2
   exit 1

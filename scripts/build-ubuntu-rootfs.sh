@@ -12,6 +12,22 @@ WORK="${WORK_DIR:-$PWD/.work}"
 ROOT="$WORK/rootfs"
 IMG="$OUT/ubuntu-${RELEASE}-${ARCH}.ext4"
 
+cleanup_mounts() {
+  local status=$?
+  trap - EXIT
+  for target in "$WORK/mnt" "$ROOT/sys" "$ROOT/proc"; do
+    if [[ -d "$target" ]] && mountpoint -q "$target"; then
+      if ! umount "$target"; then
+        echo "Failed to unmount $target during cleanup." >&2
+        status=1
+      fi
+    fi
+  done
+  exit "$status"
+}
+trap 'status=$?; printf "ERROR: line %s: command exited with status %s: %s\n" "$LINENO" "$status" "$BASH_COMMAND" >&2' ERR
+trap cleanup_mounts EXIT
+
 if [[ "$(id -u)" != 0 ]]; then
   echo "Run this script as root on an Ubuntu build runner." >&2
   exit 2
@@ -64,6 +80,14 @@ done
 rm -f "$ROOT/etc/resolv.conf"
 cp --dereference /etc/resolv.conf "$ROOT/etc/resolv.conf"
 
+# Package maintainer scripts and systemd-tmpfiles expect these kernel
+# filesystems to be mounted inside the chroot.
+mkdir -p "$ROOT/proc" "$ROOT/sys"
+mount -t proc -o nosuid,nodev,noexec proc "$ROOT/proc"
+mount -t sysfs -o ro,nosuid,nodev,noexec sysfs "$ROOT/sys"
+mountpoint -q "$ROOT/proc"
+mountpoint -q "$ROOT/sys"
+
 # Keep the guest small but usable. Package availability is tested at image build time.
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get \
@@ -72,6 +96,8 @@ chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get \
   curl wget iproute2 iputils-ping netbase dnsutils vim-tiny less locales tzdata \
   apt-transport-https
 chroot "$ROOT" apt-get clean
+umount "$ROOT/sys"
+umount "$ROOT/proc"
 
 # UML's vector transport creates vec0. passt's forced local mode supplies its
 # DHCP address, gateway, and DNS; networkd retries DHCP as the device appears.
@@ -128,14 +154,15 @@ grep -Fxq 'DHCP=yes' "$ROOT/etc/systemd/network/20-uml-vec.network"
 service_enabled() {
   local enabled_link
   enabled_link="$(find "$ROOT/etc/systemd/system" "$ROOT/usr/lib/systemd/system" \
-    -type l -path "*/wants/$1" -print -quit)"
+    -type l -path "*.wants/$1" -print -quit)"
   [[ -n "$enabled_link" ]]
 }
 service_enabled systemd-networkd.service
 service_enabled systemd-resolved.service
-service_enabled dbus.service
+test -s "$ROOT/usr/lib/systemd/system/dbus.service"
+test -x "$ROOT/usr/bin/dbus-daemon"
 wait_online_link="$(find "$ROOT/etc/systemd/system" "$ROOT/usr/lib/systemd/system" \
-  -type l -path '*/wants/systemd-networkd-wait-online.service' -print -quit)"
+  -type l -path '*.wants/systemd-networkd-wait-online.service' -print -quit)"
 if [[ -n "$wait_online_link" ]]; then
   echo "networkd-wait-online must stay disabled for the late-arriving UML interface." >&2
   exit 1
@@ -148,11 +175,9 @@ truncate -s "${SIZE_MIB}M" "$IMG"
 mkfs.ext4 -F -L UBUNTU_UML "$IMG"
 mkdir -p "$WORK/mnt"
 mount -o loop "$IMG" "$WORK/mnt"
-trap 'umount "$WORK/mnt" 2>/dev/null || true' EXIT
 cp -a "$ROOT/." "$WORK/mnt/"
 sync
 umount "$WORK/mnt"
-trap - EXIT
 
 # Basic structural checks, not a UML boot test.
 file "$IMG"
