@@ -203,6 +203,8 @@ grep -Fq -- '--autologin root' "$CONSOLE_OVERRIDE"
 grep -Fxq 'TTYPath=/dev/tty0' "$CONSOLE_OVERRIDE"
 require_file /root/.profile
 grep -Fq 'tmux new-session -A -s ubuntu' "$MOUNT_DIR/root/.profile"
+require_file /root/.tmux.conf
+grep -Fq 'set -g history-limit 25000' "$MOUNT_DIR/root/.tmux.conf"
 grep -Fq ' tty0 vt102' "$CONSOLE_OVERRIDE"
 grep -Fxq 'ExecStart=' "$CONSOLE_OVERRIDE"
 awk -F: '$1 == "root" && $2 ~ /^[!*]/ { locked=1 } END { exit !locked }' \

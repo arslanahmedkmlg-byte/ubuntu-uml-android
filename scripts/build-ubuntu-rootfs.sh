@@ -158,6 +158,14 @@ if [ -t 0 ] && [ -z "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
   tmux new-session -A -s ubuntu
 fi
 TMUX_PROFILE
+cat > "$ROOT/root/.tmux.conf" <<'TMUX_CONF'
+set -g history-limit 25000
+set -g mouse off
+set -g status on
+set -g renumber-windows on
+set -g default-terminal "screen-256color"
+set -g escape-time 10
+TMUX_CONF
 
 mkdir -p "$ROOT/etc/systemd/resolved.conf.d"
 cat > "$ROOT/etc/systemd/resolved.conf.d/10-ubuntu-uml.conf" <<'RESOLVED'

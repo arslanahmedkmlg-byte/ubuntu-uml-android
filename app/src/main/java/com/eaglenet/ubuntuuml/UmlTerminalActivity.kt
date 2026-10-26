@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
 import org.connectbot.terminal.ModifierManager
 import org.connectbot.terminal.SelectionController
@@ -55,6 +56,32 @@ class UmlTerminalActivity : ComponentActivity() {
 
     private var displayOutput:
         ((ByteArray, Int) -> Unit)? = null
+
+    private var terminalTypeface by mutableStateOf(Typeface.MONOSPACE)
+
+    private val selectFont = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                val path = File(filesDir, "terminal-font.ttf")
+                val candidate = File(filesDir, "terminal-font.tmp")
+                try {
+                    contentResolver.openInputStream(uri)?.use { source ->
+                        FileOutputStream(candidate).use { dest -> source.copyTo(dest) }
+                    } ?: error("Cannot open selected font")
+                    require(candidate.length() in 1..4_194_304) { "Font must be smaller than 4 MiB" }
+                    val validated = Typeface.createFromFile(candidate)
+                    require(candidate.renameTo(path)) { "Could not save font" }
+                    terminalTypeface = validated
+                } finally {
+                    candidate.delete()
+                }
+            }.onFailure {
+                ActiveVm.state.update { state ->
+                    state.copy(status = "Font import failed: ${it.message}")
+                }
+            }
+        }
+    }
 
     private var imeVisible = false
     private var restoreKeyboardOnResume = false
@@ -336,6 +363,9 @@ class UmlTerminalActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        File(filesDir, "terminal-font.ttf").takeIf { it.isFile }?.let { fontFile ->
+            runCatching { Typeface.createFromFile(fontFile) }.onSuccess { terminalTypeface = it }
+        }
         val preferences = getSharedPreferences("uml_settings", MODE_PRIVATE)
         val diskReady = disk.isFile && disk.length() > 128L * 1024L * 1024L
         ActiveVm.state.update { state ->
@@ -358,7 +388,18 @@ class UmlTerminalActivity : ComponentActivity() {
             var font by remember {
                 mutableIntStateOf(preferences.getInt("terminal_font_sp", 11).coerceIn(8, 24))
             }
+            var keyboardChoice by remember {
+                mutableStateOf(preferences.getString("keyboard_mode", "Secure") ?: "Secure")
+            }
+            var keyboardMenuOpen by remember { mutableStateOf(false) }
+            var displaySettingsExpanded by remember { mutableStateOf(false) }
+            val havenKeyboardMode = when (keyboardChoice) {
+                "Standard" -> HavenKeyboardMode.Standard
+                "Raw" -> HavenKeyboardMode.Raw
+                else -> HavenKeyboardMode.Secure
+            }
             val terminalFocus = remember { FocusRequester() }
+            val softwareKeyboard = LocalSoftwareKeyboardController.current
             var ctrlActive by remember { mutableStateOf(false) }
             var selectionController by remember { mutableStateOf<SelectionController?>(null) }
             val modifierManager = remember {
@@ -443,6 +484,10 @@ class UmlTerminalActivity : ComponentActivity() {
                             fontSize = 15.sp
                         )
 
+                        TextButton(onClick = { displaySettingsExpanded = !displaySettingsExpanded }) {
+                            Text(if (displaySettingsExpanded) "Hide display" else "Display")
+                        }
+
                         TextButton(
                             onClick = {
                                 settingsLauncher.launch(
@@ -514,6 +559,7 @@ class UmlTerminalActivity : ComponentActivity() {
                         }
                     }
 
+                    if (displaySettingsExpanded) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -530,6 +576,45 @@ class UmlTerminalActivity : ComponentActivity() {
                             modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
                         )
                         Text("${font}sp", fontSize = 12.sp, color = fg)
+                        TextButton(onClick = { selectFont.launch(arrayOf("*/*")) }) {
+                            Text("Font file")
+                        }
+                        TextButton(onClick = {
+                            File(filesDir, "terminal-font.ttf").delete()
+                            terminalTypeface = Typeface.MONOSPACE
+                        }) { Text("Reset") }
+
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Keyboard", fontSize = 12.sp, color = fg)
+                        Box {
+                            TextButton(onClick = { keyboardMenuOpen = true }) {
+                                Text(keyboardChoice)
+                            }
+                            DropdownMenu(
+                                expanded = keyboardMenuOpen,
+                                onDismissRequest = { keyboardMenuOpen = false }
+                            ) {
+                                listOf("Secure", "Standard", "Raw").forEach { mode ->
+                                    DropdownMenuItem(
+                                        text = { Text(mode) },
+                                        onClick = {
+                                            keyboardChoice = mode
+                                            preferences.edit().putString("keyboard_mode", mode).apply()
+                                            keyboardMenuOpen = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        Text("Secure recommended for SwiftKey", fontSize = 11.sp,
+                             color = Color(0xffa6b3cd))
+                    }
+
                     }
 
                     Text(
@@ -551,7 +636,7 @@ class UmlTerminalActivity : ComponentActivity() {
                             HavenTerminal(
                                 terminalEmulator = emulator,
                                 modifier = Modifier.fillMaxSize(),
-                                typeface = Typeface.MONOSPACE,
+                                typeface = terminalTypeface,
                                 initialFontSize = font.sp,
                                 minFontSize = 8.sp,
                                 maxFontSize = 24.sp,
@@ -564,13 +649,14 @@ class UmlTerminalActivity : ComponentActivity() {
                                 keyboardEnabled = vmState.consoleReady,
                                 showSoftKeyboard = vmState.consoleReady,
                                 imeRestoreTick = keyboardRestoreTick,
-                                keyboardMode = HavenKeyboardMode.Secure,
+                                keyboardMode = havenKeyboardMode,
                                 focusRequester = terminalFocus,
                                 onTerminalTap = {
                                     terminalFocus.requestFocus()
                                     keyboardRestoreTick++
                                 },
                                 reflowOnKeyboard = false,
+                                tapToPositionCursorOnPrompt = true,
                                 modifierManager = modifierManager,
                                 onSelectionControllerAvailable = { selectionController = it },
                                 onPasteShortcut = { pasteClipboard() },
@@ -626,8 +712,12 @@ class UmlTerminalActivity : ComponentActivity() {
                         TextButton(
                             enabled = vmState.consoleReady,
                             onClick = {
-                                terminalFocus.requestFocus()
-                                keyboardRestoreTick++
+                                if (imeVisible) {
+                                    softwareKeyboard?.hide()
+                                } else {
+                                    terminalFocus.requestFocus()
+                                    keyboardRestoreTick++
+                                }
                             }
                         ) {
                             Text("⌨ Keyboard", color = Color(0xffc3b2ff))
@@ -640,6 +730,9 @@ class UmlTerminalActivity : ComponentActivity() {
                                 selectionController?.clearSelection()
                             } else selectionController?.startSelection()
                         }) { Text("Copy") }
+                        TextButton(enabled = vmState.consoleReady, onClick = {
+                            selectionController?.selectAll()
+                        }) { Text("Select all") }
                         TextButton(enabled = vmState.consoleReady, onClick = { pasteClipboard() }) {
                             Text("Paste")
                         }
@@ -660,6 +753,14 @@ class UmlTerminalActivity : ComponentActivity() {
                             ) { Text(label, fontSize = 12.sp) }
                         }
 
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         val keys = listOf(
                             "ESC" to "\u001b",
                             "TAB" to "\t",
