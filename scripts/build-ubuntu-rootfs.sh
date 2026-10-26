@@ -45,7 +45,9 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends debootstrap e2fsprogs ca-certificates util-linux
 mkdir -p "$OUT" "$WORK"
-if mountpoint -q "$ROOT"; then umount -lf "$ROOT"; fi
+for target in "$WORK/mnt" "$ROOT/sys" "$ROOT/proc" "$ROOT"; do
+  if mountpoint -q "$target"; then umount "$target"; fi
+done
 rm -rf "$ROOT" "$IMG"
 mkdir -p "$ROOT"
 
@@ -90,11 +92,14 @@ mountpoint -q "$ROOT/sys"
 
 # Keep the guest small but usable. Package availability is tested at image build time.
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
+# Keep the full guest utility baseline while avoiding recommends that are not
+# needed for UML, networking, package management, or local console use.
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get \
   -o Dpkg::Use-Pty=0 install -y --no-install-recommends \
-  systemd-sysv systemd-resolved dbus sudo bash ca-certificates \
+  systemd-sysv systemd-resolved systemd-timesyncd udev dbus sudo bash \
+  ca-certificates \
   curl wget iproute2 iputils-ping netbase dnsutils vim-tiny less locales tzdata \
-  apt-transport-https
+  util-linux login passwd procps kmod e2fsprogs git openssh-client
 chroot "$ROOT" apt-get clean
 umount "$ROOT/sys"
 umount "$ROOT/proc"
@@ -120,19 +125,29 @@ Name=vec0
 RequiredForOnline=no
 
 [Network]
-DHCP=yes
+DHCP=ipv4
 IPv6AcceptRA=yes
 
 [DHCPv4]
 UseDNS=yes
 UseRoutes=yes
-
-[DHCPv6]
-UseDNS=yes
 NETWORK
 systemctl --root="$ROOT" enable \
-  systemd-networkd.service systemd-resolved.service dbus.service
+  systemd-networkd.service systemd-resolved.service dbus.service \
+  systemd-timesyncd.service
 systemctl --root="$ROOT" disable systemd-networkd-wait-online.service
+
+# UML exposes its inherited PTY as the guest console. Keep automatic access
+# restricted to that local console; no SSH server is installed.
+mkdir -p "$ROOT/etc/systemd/system/console-getty.service.d"
+cat > "$ROOT/etc/systemd/system/console-getty.service.d/10-uml-autologin.conf" <<'GETTY'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud 115200,38400,9600 console vt102
+GETTY
+mkdir -p "$ROOT/etc/systemd/system/getty.target.wants"
+ln -sfn /usr/lib/systemd/system/console-getty.service \
+  "$ROOT/etc/systemd/system/getty.target.wants/console-getty.service"
 
 mkdir -p "$ROOT/etc/systemd/resolved.conf.d"
 cat > "$ROOT/etc/systemd/resolved.conf.d/10-ubuntu-uml.conf" <<'RESOLVED'
@@ -146,11 +161,12 @@ RESOLVED
 rm -f "$ROOT/etc/resolv.conf"
 ln -s ../run/systemd/resolve/stub-resolv.conf "$ROOT/etc/resolv.conf"
 rm -rf "$ROOT/var/lib/apt/lists/"* "$ROOT/var/cache/apt/archives/"*.deb
+rm -rf "$ROOT/debootstrap"
 
 test -s "$ROOT/etc/systemd/network/10-loopback.network"
 test -s "$ROOT/etc/systemd/network/20-uml-vec.network"
 grep -Fxq 'Name=vec0' "$ROOT/etc/systemd/network/20-uml-vec.network"
-grep -Fxq 'DHCP=yes' "$ROOT/etc/systemd/network/20-uml-vec.network"
+grep -Fxq 'DHCP=ipv4' "$ROOT/etc/systemd/network/20-uml-vec.network"
 service_enabled() {
   local enabled_link
   enabled_link="$(find "$ROOT/etc/systemd/system" "$ROOT/usr/lib/systemd/system" \
@@ -159,8 +175,17 @@ service_enabled() {
 }
 service_enabled systemd-networkd.service
 service_enabled systemd-resolved.service
+service_enabled systemd-timesyncd.service
 test -s "$ROOT/usr/lib/systemd/system/dbus.service"
 test -x "$ROOT/usr/bin/dbus-daemon"
+test -x "$ROOT/usr/lib/systemd/systemd-udevd"
+test -x "$ROOT/usr/bin/udevadm"
+test -x "$ROOT/usr/bin/ssh"
+test -x "$ROOT/usr/bin/git"
+test -x "$ROOT/usr/sbin/modprobe"
+grep -Fq -- '--autologin root' \
+  "$ROOT/etc/systemd/system/console-getty.service.d/10-uml-autologin.conf"
+test -L "$ROOT/etc/systemd/system/getty.target.wants/console-getty.service"
 wait_online_link="$(find "$ROOT/etc/systemd/system" "$ROOT/usr/lib/systemd/system" \
   -type l -path '*.wants/systemd-networkd-wait-online.service' -print -quit)"
 if [[ -n "$wait_online_link" ]]; then
@@ -169,6 +194,7 @@ if [[ -n "$wait_online_link" ]]; then
 fi
 test "$(readlink "$ROOT/etc/resolv.conf")" = ../run/systemd/resolve/stub-resolv.conf
 test -s "$ROOT/etc/systemd/resolved.conf.d/10-ubuntu-uml.conf"
+test ! -e "$ROOT/usr/sbin/sshd"
 
 # Create a filesystem image; no loop mount is needed for population.
 truncate -s "${SIZE_MIB}M" "$IMG"
