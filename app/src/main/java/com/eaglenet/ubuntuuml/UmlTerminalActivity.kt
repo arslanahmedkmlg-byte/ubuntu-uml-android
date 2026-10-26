@@ -401,13 +401,17 @@ class UmlTerminalActivity : ComponentActivity() {
             val terminalFocus = remember { FocusRequester() }
             val softwareKeyboard = LocalSoftwareKeyboardController.current
             var ctrlActive by remember { mutableStateOf(false) }
+            var altActive by remember { mutableStateOf(false) }
             var selectionController by remember { mutableStateOf<SelectionController?>(null) }
             val modifierManager = remember {
                 object : ModifierManager {
                     override fun isCtrlActive() = ctrlActive
-                    override fun isAltActive() = false
+                    override fun isAltActive() = altActive
                     override fun isShiftActive() = false
-                    override fun clearTransients() { ctrlActive = false }
+                    override fun clearTransients() {
+                        ctrlActive = false
+                        altActive = false
+                    }
                 }
             }
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -488,6 +492,10 @@ class UmlTerminalActivity : ComponentActivity() {
                             Text(if (displaySettingsExpanded) "Hide display" else "Display")
                         }
 
+                        if (vmState.running) {
+                            TextButton(onClick = { stopGuest() }) { Text("Stop") }
+                        }
+
                         TextButton(
                             onClick = {
                                 settingsLauncher.launch(
@@ -502,6 +510,7 @@ class UmlTerminalActivity : ComponentActivity() {
                         }
                     }
 
+                    if (!vmState.running) {
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -521,15 +530,6 @@ class UmlTerminalActivity : ComponentActivity() {
                             }
                         ) {
                             Text("Start Ubuntu")
-                        }
-
-                        OutlinedButton(
-                            enabled = vmState.running,
-                            onClick = {
-                                stopGuest()
-                            }
-                        ) {
-                            Text("Stop")
                         }
 
                         OutlinedButton(
@@ -557,6 +557,8 @@ class UmlTerminalActivity : ComponentActivity() {
                         ) {
                             Text("RAM ${vmState.ramMiB}M")
                         }
+                    }
+
                     }
 
                     if (displaySettingsExpanded) {
@@ -697,6 +699,30 @@ class UmlTerminalActivity : ComponentActivity() {
                                 },
                             )
 
+                        if (selectionController?.isSelectionActive == true) {
+                            Surface(
+                                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                                tonalElevation = 8.dp,
+                                color = Color(0xff303342)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = { selectionController?.copySelection() }) {
+                                        Text("Copy")
+                                    }
+                                    TextButton(onClick = { pasteClipboard() }) {
+                                        Text("Paste")
+                                    }
+                                    TextButton(onClick = { selectionController?.selectAll() }) {
+                                        Text("Select all")
+                                    }
+                                    TextButton(onClick = { selectionController?.clearSelection() }) {
+                                        Text("Close")
+                                    }
+                                }
+                            }
+                        }
+
                     }
 
                     Row(
@@ -736,9 +762,26 @@ class UmlTerminalActivity : ComponentActivity() {
                         TextButton(enabled = vmState.consoleReady, onClick = { pasteClipboard() }) {
                             Text("Paste")
                         }
+                        TextButton(enabled = vmState.consoleReady, onClick = {
+                            val lastOutput = emulator.getLastCommandOutput()
+                            if (lastOutput.isNullOrBlank()) {
+                                ActiveVm.state.update { it.copy(status = "No completed command output available") }
+                            } else {
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Last command output", lastOutput))
+                            }
+                        }) { Text("Copy output") }
+
                         TextButton(enabled = vmState.consoleReady, onClick = { ctrlActive = !ctrlActive }) {
                             Text(if (ctrlActive) "CTRL ON" else "CTRL")
                         }
+
+                        TextButton(enabled = vmState.consoleReady, onClick = { altActive = !altActive }) {
+                            Text(if (altActive) "ALT ON" else "ALT")
+                        }
+                        TextButton(enabled = vmState.consoleReady, onClick = {
+                            session?.send(if (vmState.rootShell) byteArrayOf(0x12)
+                                else "\u0002[/".toByteArray(Charsets.UTF_8))
+                        }) { Text("Search") }
 
                         // tmux, preinstalled in new rootfs images, owns the guest-side
                         // PTYs so switching windows does not reboot or duplicate UML.
@@ -777,10 +820,20 @@ class UmlTerminalActivity : ComponentActivity() {
                             "END" to "\u001b[F",
                             "PGUP" to "\u001b[5~",
                             "PGDN" to "\u001b[6~",
+                            "DEL" to "\u001b[3~",
+                            "INS" to "\u001b[2~",
                             "F1" to "\u001bOP",
                             "F2" to "\u001bOQ",
                             "F3" to "\u001bOR",
                             "F4" to "\u001bOS",
+                            "F5" to "\u001b[15~",
+                            "F6" to "\u001b[17~",
+                            "F7" to "\u001b[18~",
+                            "F8" to "\u001b[19~",
+                            "F9" to "\u001b[20~",
+                            "F10" to "\u001b[21~",
+                            "F11" to "\u001b[23~",
+                            "F12" to "\u001b[24~",
                         )
 
                         keys.forEach { (label, seq) ->

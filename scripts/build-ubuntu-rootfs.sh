@@ -165,7 +165,35 @@ set -g status on
 set -g renumber-windows on
 set -g default-terminal "screen-256color"
 set -g escape-time 10
+set -g allow-passthrough on
 TMUX_CONF
+
+# OSC 133 marks shell prompt, input and output boundaries. This enables
+# accurate tap-to-position and "copy last output" in the Haven renderer.
+# tmux needs its DCS passthrough envelope for terminal-directed OSC codes.
+cat >> "$ROOT/root/.bashrc" <<'SHELL_INTEGRATION'
+if [[ $- == *i* && -z ${_UML_OSC133_READY:-} ]]; then
+  _UML_OSC133_READY=1
+  _uml_osc133() {
+    if [[ -n ${TMUX:-} ]]; then
+      printf '\033Ptmux;\033\033]133;%s\007\033\\' "$1"
+    else
+      printf '\033]133;%s\007' "$1"
+    fi
+  }
+  _uml_previous_prompt_command=${PROMPT_COMMAND:-}
+  _uml_finish_command() {
+    local exit_code=$?
+    _uml_osc133 "D;${exit_code}"
+    if [[ -n $_uml_previous_prompt_command ]]; then
+      eval "$_uml_previous_prompt_command"
+    fi
+  }
+  PROMPT_COMMAND=_uml_finish_command
+  PS0='\[$(_uml_osc133 C)\]'
+  PS1='\[$(_uml_osc133 A)\]'"${PS1:-\u@\h:\w\$ }"'\[$(_uml_osc133 B)\]'
+fi
+SHELL_INTEGRATION
 
 mkdir -p "$ROOT/etc/systemd/resolved.conf.d"
 cat > "$ROOT/etc/systemd/resolved.conf.d/10-ubuntu-uml.conf" <<'RESOLVED'
