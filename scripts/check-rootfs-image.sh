@@ -48,8 +48,10 @@ require_file() {
   }
 }
 require_enabled() {
-  find "$MOUNT_DIR/etc/systemd/system" "$MOUNT_DIR/usr/lib/systemd/system" \
-    -type l -path "*/wants/$1" -print -quit | grep -q . || {
+  local enabled_link
+  enabled_link="$(find "$MOUNT_DIR/etc/systemd/system" "$MOUNT_DIR/usr/lib/systemd/system" \
+    -type l -path "*/wants/$1" -print -quit)"
+  [[ -n "$enabled_link" ]] || {
     echo "Required systemd service is not enabled: $1" >&2
     exit 1
   }
@@ -95,8 +97,9 @@ grep -Fxq 'UseRoutes=yes' "$VEC"
 require_enabled systemd-networkd.service
 require_enabled systemd-resolved.service
 require_enabled dbus.service
-if find "$MOUNT_DIR/etc/systemd/system" "$MOUNT_DIR/usr/lib/systemd/system" \
-  -type l -path '*/wants/systemd-networkd-wait-online.service' -print -quit | grep -q .; then
+WAIT_ONLINE_LINK="$(find "$MOUNT_DIR/etc/systemd/system" "$MOUNT_DIR/usr/lib/systemd/system" \
+  -type l -path '*/wants/systemd-networkd-wait-online.service' -print -quit)"
+if [[ -n "$WAIT_ONLINE_LINK" ]]; then
   echo "networkd-wait-online must be disabled so a late UML interface cannot block startup." >&2
   exit 1
 fi
@@ -115,10 +118,12 @@ grep -Eq '^[[:space:]]*sysfs[[:space:]]+/sys[[:space:]]+sysfs([[:space:]]|$)' "$
 grep -Eq '^[[:space:]]*devpts[[:space:]]+/dev/pts[[:space:]]+devpts([[:space:]]|$)' "$MOUNT_DIR/etc/fstab"
 grep -Eq '^[[:space:]]*tmpfs[[:space:]]+/run[[:space:]]+tmpfs([[:space:]]|$)' "$MOUNT_DIR/etc/fstab"
 
-if [[ ! -s "$MOUNT_DIR/etc/apt/sources.list" ]] &&
-   { [[ ! -d "$MOUNT_DIR/etc/apt/sources.list.d" ]] ||
-     ! find "$MOUNT_DIR/etc/apt/sources.list.d" -maxdepth 1 -type f \
-       \( -name '*.list' -o -name '*.sources' \) -print -quit | grep -q .; }; then
+APT_SOURCE=""
+if [[ -d "$MOUNT_DIR/etc/apt/sources.list.d" ]]; then
+  APT_SOURCE="$(find "$MOUNT_DIR/etc/apt/sources.list.d" -maxdepth 1 -type f \
+    \( -name '*.list' -o -name '*.sources' \) -print -quit)"
+fi
+if [[ ! -s "$MOUNT_DIR/etc/apt/sources.list" && -z "$APT_SOURCE" ]]; then
   echo "No APT source configuration found in the image." >&2
   exit 1
 fi

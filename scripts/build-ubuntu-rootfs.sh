@@ -126,14 +126,17 @@ test -s "$ROOT/etc/systemd/network/20-uml-vec.network"
 grep -Fxq 'Name=vec0' "$ROOT/etc/systemd/network/20-uml-vec.network"
 grep -Fxq 'DHCP=yes' "$ROOT/etc/systemd/network/20-uml-vec.network"
 service_enabled() {
-  find "$ROOT/etc/systemd/system" "$ROOT/usr/lib/systemd/system" \
-    -type l -path "*/wants/$1" -print -quit | grep -q .
+  local enabled_link
+  enabled_link="$(find "$ROOT/etc/systemd/system" "$ROOT/usr/lib/systemd/system" \
+    -type l -path "*/wants/$1" -print -quit)"
+  [[ -n "$enabled_link" ]]
 }
 service_enabled systemd-networkd.service
 service_enabled systemd-resolved.service
 service_enabled dbus.service
-if find "$ROOT/etc/systemd/system" "$ROOT/usr/lib/systemd/system" \
-  -type l -path '*/wants/systemd-networkd-wait-online.service' -print -quit | grep -q .; then
+wait_online_link="$(find "$ROOT/etc/systemd/system" "$ROOT/usr/lib/systemd/system" \
+  -type l -path '*/wants/systemd-networkd-wait-online.service' -print -quit)"
+if [[ -n "$wait_online_link" ]]; then
   echo "networkd-wait-online must stay disabled for the late-arriving UML interface." >&2
   exit 1
 fi
