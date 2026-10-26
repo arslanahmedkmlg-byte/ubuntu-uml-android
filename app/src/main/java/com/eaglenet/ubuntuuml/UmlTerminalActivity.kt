@@ -647,6 +647,19 @@ class UmlTerminalActivity : ComponentActivity() {
                             Text(if (ctrlActive) "CTRL ON" else "CTRL")
                         }
 
+                        // tmux, preinstalled in new rootfs images, owns the guest-side
+                        // PTYs so switching windows does not reboot or duplicate UML.
+                        val tabActions = listOf(
+                            "New tab" to "\u0002c",
+                            "Prev tab" to "\u0002p",
+                            "Next tab" to "\u0002n",
+                        )
+                        tabActions.forEach { (label, keys) ->
+                            TextButton(enabled = vmState.consoleReady && !vmState.rootShell,
+                                onClick = { session?.send(keys.toByteArray(Charsets.UTF_8)) }
+                            ) { Text(label, fontSize = 12.sp) }
+                        }
+
                         val keys = listOf(
                             "ESC" to "\u001b",
                             "TAB" to "\t",

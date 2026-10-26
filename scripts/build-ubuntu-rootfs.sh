@@ -72,7 +72,7 @@ FSTAB
 mkdir -p "$ROOT/dev/pts" "$ROOT/dev/shm" "$ROOT/run" "$ROOT/tmp"
 chmod 1777 "$ROOT/dev/shm" "$ROOT/tmp"
 # UML device nodes are not guaranteed to be supplied by devtmpfs.
-for spec in 'null:c:1:3:666' 'zero:c:1:5:666' 'tty:c:5:0:666' 'console:c:5:1:600' 'random:c:1:8:666' 'urandom:c:1:9:666'; do
+for spec in 'null:c:1:3:666' 'zero:c:1:5:666' 'tty:c:5:0:666' 'tty0:c:4:0:600' 'console:c:5:1:600' 'random:c:1:8:666' 'urandom:c:1:9:666'; do
   IFS=: read -r node kind major minor mode <<< "$spec"
   if [[ ! -e "$ROOT/dev/$node" ]]; then mknod "$ROOT/dev/$node" "$kind" "$major" "$minor"; fi
   chmod "$mode" "$ROOT/dev/$node"
@@ -99,7 +99,7 @@ chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get \
   systemd-sysv systemd-resolved systemd-timesyncd udev dbus sudo bash \
   ca-certificates \
   curl wget iproute2 iputils-ping netbase dnsutils vim-tiny less locales tzdata \
-  util-linux login passwd procps kmod e2fsprogs git openssh-client
+  util-linux login passwd procps kmod e2fsprogs git openssh-client tmux
 chroot "$ROOT" apt-get clean
 umount "$ROOT/sys"
 umount "$ROOT/proc"
@@ -149,6 +149,15 @@ GETTY
 mkdir -p "$ROOT/etc/systemd/system/getty.target.wants"
 ln -sfn /usr/lib/systemd/system/console-getty.service \
   "$ROOT/etc/systemd/system/getty.target.wants/console-getty.service"
+
+# An interactive login can host multiple independent guest PTYs with tmux.
+# Only start it on a real TTY, and leave an ordinary login shell available
+# if tmux cannot start. Do not involve the recovery init=/bin/bash path.
+cat >> "$ROOT/root/.profile" <<'TMUX_PROFILE'
+if [ -t 0 ] && [ -z "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+  tmux new-session -A -s ubuntu
+fi
+TMUX_PROFILE
 
 mkdir -p "$ROOT/etc/systemd/resolved.conf.d"
 cat > "$ROOT/etc/systemd/resolved.conf.d/10-ubuntu-uml.conf" <<'RESOLVED'

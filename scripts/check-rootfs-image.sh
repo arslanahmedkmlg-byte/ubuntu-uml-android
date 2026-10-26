@@ -80,7 +80,7 @@ PACKAGES=(
   systemd systemd-sysv systemd-resolved systemd-timesyncd udev dbus
   dbus-daemon sudo bash ca-certificates curl wget iproute2 iputils-ping
   netbase bind9-dnsutils vim-tiny less locales tzdata
-  util-linux login passwd procps kmod e2fsprogs git openssh-client
+  util-linux login passwd procps kmod e2fsprogs git openssh-client tmux
 )
 for package in "${PACKAGES[@]}"; do
   require_package "$package"
@@ -104,7 +104,7 @@ EXECUTABLES=(
   /usr/bin/git /usr/bin/udevadm /usr/bin/resolvectl /usr/bin/networkctl
   /usr/bin/systemctl /usr/bin/dbus-daemon /usr/bin/ps /usr/bin/locale
   /usr/bin/timedatectl /usr/sbin/modprobe /usr/sbin/agetty /usr/bin/login
-  /usr/bin/passwd /usr/bin/mount /usr/sbin/mkfs.ext4 /usr/sbin/fsck.ext4
+  /usr/bin/passwd /usr/bin/tmux /usr/bin/mount /usr/sbin/mkfs.ext4 /usr/sbin/fsck.ext4
   /usr/lib/systemd/systemd-udevd /usr/lib/systemd/systemd-networkd
   /usr/lib/systemd/systemd-resolved /usr/lib/systemd/systemd-timesyncd
 )
@@ -189,6 +189,9 @@ done
 
 CONSOLE_OVERRIDE="$MOUNT_DIR/etc/systemd/system/console-getty.service.d/10-uml-autologin.conf"
 require_file /dev/console
+require_file /dev/tty0
+[[ -c "$MOUNT_DIR/dev/tty0" ]]
+[[ "$(stat -c '%t:%T' "$MOUNT_DIR/dev/tty0")" == '4:0' ]]
 [[ -c "$MOUNT_DIR/dev/console" ]]
 [[ "$(stat -c '%t:%T' "$MOUNT_DIR/dev/console")" == '5:1' ]]
 require_file /etc/systemd/system/getty.target.wants/console-getty.service
@@ -198,6 +201,8 @@ require_file /etc/systemd/system/getty.target.wants/console-getty.service
 require_file "${CONSOLE_OVERRIDE#"$MOUNT_DIR"}"
 grep -Fq -- '--autologin root' "$CONSOLE_OVERRIDE"
 grep -Fxq 'TTYPath=/dev/tty0' "$CONSOLE_OVERRIDE"
+require_file /root/.profile
+grep -Fq 'tmux new-session -A -s ubuntu' "$MOUNT_DIR/root/.profile"
 grep -Fq ' tty0 vt102' "$CONSOLE_OVERRIDE"
 grep -Fxq 'ExecStart=' "$CONSOLE_OVERRIDE"
 awk -F: '$1 == "root" && $2 ~ /^[!*]/ { locked=1 } END { exit !locked }' \
