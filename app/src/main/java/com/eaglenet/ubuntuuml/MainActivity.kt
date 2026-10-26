@@ -85,6 +85,14 @@ class MainActivity : ComponentActivity() {
                         }
 
                         OutlinedButton(
+                            onClick = { finishWithAction(VmSettingsAction.RECOVERY) },
+                            enabled = state.terminalAvailable && !state.running && !state.importing,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Recovery shell (emergency)")
+                        }
+
+                        OutlinedButton(
                             onClick = { finishWithAction(VmSettingsAction.STOP) },
                             enabled = state.running,
                             modifier = Modifier.fillMaxWidth(),

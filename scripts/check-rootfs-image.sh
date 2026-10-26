@@ -197,6 +197,8 @@ require_file /etc/systemd/system/getty.target.wants/console-getty.service
   /usr/lib/systemd/system/console-getty.service ]]
 require_file "${CONSOLE_OVERRIDE#"$MOUNT_DIR"}"
 grep -Fq -- '--autologin root' "$CONSOLE_OVERRIDE"
+grep -Fxq 'TTYPath=/dev/tty0' "$CONSOLE_OVERRIDE"
+grep -Fq ' tty0 vt102' "$CONSOLE_OVERRIDE"
 grep -Fxq 'ExecStart=' "$CONSOLE_OVERRIDE"
 awk -F: '$1 == "root" && $2 ~ /^[!*]/ { locked=1 } END { exit !locked }' \
   "$MOUNT_DIR/etc/shadow"

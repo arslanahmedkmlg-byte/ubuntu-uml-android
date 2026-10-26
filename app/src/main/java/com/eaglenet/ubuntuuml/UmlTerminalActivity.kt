@@ -1,5 +1,8 @@
 package com.eaglenet.ubuntuuml
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
@@ -27,6 +30,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 
+import org.connectbot.terminal.ModifierManager
+import org.connectbot.terminal.SelectionController
 import org.connectbot.terminal.TerminalEmulatorFactory
 import sh.haven.core.terminal.HavenKeyboardMode
 import sh.haven.core.terminal.HavenTerminal
@@ -62,6 +67,7 @@ class UmlTerminalActivity : ComponentActivity() {
         if (result.resultCode == RESULT_OK) {
             when (result.data?.getStringExtra(VmSettingsAction.EXTRA_ACTION)) {
                 VmSettingsAction.START -> boot(rootShell = false)
+                VmSettingsAction.RECOVERY -> boot(rootShell = true)
                 VmSettingsAction.STOP -> stopGuest()
             }
         }
@@ -350,9 +356,24 @@ class UmlTerminalActivity : ComponentActivity() {
             val vmState = ActiveVm.state.value
 
             var font by remember {
-                mutableIntStateOf(13)
+                mutableIntStateOf(preferences.getInt("terminal_font_sp", 11).coerceIn(8, 24))
             }
             val terminalFocus = remember { FocusRequester() }
+            var ctrlActive by remember { mutableStateOf(false) }
+            var selectionController by remember { mutableStateOf<SelectionController?>(null) }
+            val modifierManager = remember {
+                object : ModifierManager {
+                    override fun isCtrlActive() = ctrlActive
+                    override fun isAltActive() = false
+                    override fun isShiftActive() = false
+                    override fun clearTransients() { ctrlActive = false }
+                }
+            }
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            fun pasteClipboard() {
+                val content = clipboard.primaryClip?.getItemAt(0)?.coerceToText(this@UmlTerminalActivity)?.toString()
+                if (!content.isNullOrEmpty()) session?.send(content.toByteArray(Charsets.UTF_8))
+            }
             var terminalScrollController by remember {
                 mutableStateOf<org.connectbot.terminal.ScrollController?>(null)
             }
@@ -377,7 +398,7 @@ class UmlTerminalActivity : ComponentActivity() {
                         session?.resize(terminalCols, terminalRows)
                     },
                     onBell = {},
-                    maxScrollbackLines = 10000,
+                    maxScrollbackLines = 25000,
                 )
             }
 
@@ -410,8 +431,8 @@ class UmlTerminalActivity : ComponentActivity() {
                         Modifier
                             .fillMaxWidth()
                             .padding(
-                                horizontal = 12.dp,
-                                vertical = 6.dp
+                                horizontal = 8.dp,
+                                vertical = 4.dp
                             ),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -454,18 +475,7 @@ class UmlTerminalActivity : ComponentActivity() {
                                 boot(rootShell = false)
                             }
                         ) {
-                            Text("Systemd")
-                        }
-
-                        OutlinedButton(
-                            enabled = vmState.terminalAvailable &&
-                                !vmState.running &&
-                                !vmState.importing,
-                            onClick = {
-                                boot(rootShell = true)
-                            }
-                        ) {
-                            Text("Root shell")
+                            Text("Start Ubuntu")
                         }
 
                         OutlinedButton(
@@ -489,26 +499,6 @@ class UmlTerminalActivity : ComponentActivity() {
                         }
 
                         OutlinedButton(
-                            onClick = {
-                                font =
-                                    (font - 1)
-                                        .coerceAtLeast(8)
-                            }
-                        ) {
-                            Text("A−")
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                font =
-                                    (font + 1)
-                                        .coerceAtMost(28)
-                            }
-                        ) {
-                            Text("A+")
-                        }
-
-                        OutlinedButton(
                             enabled = !vmState.running && !vmState.importing,
                             onClick = {
                                 val ramMiB = if (vmState.ramMiB >= 4096) {
@@ -524,11 +514,29 @@ class UmlTerminalActivity : ComponentActivity() {
                         }
                     }
 
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Font", fontSize = 12.sp, color = fg)
+                        Slider(
+                            value = font.toFloat(),
+                            onValueChange = { font = it.toInt().coerceIn(8, 24) },
+                            onValueChangeFinished = {
+                                preferences.edit().putInt("terminal_font_sp", font).apply()
+                            },
+                            valueRange = 8f..24f,
+                            steps = 15,
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                        )
+                        Text("${font}sp", fontSize = 12.sp, color = fg)
+                    }
+
                     Text(
                         vmState.status,
                         modifier = Modifier.padding(
-                            start = 12.dp,
-                            bottom = 6.dp
+                            start = 8.dp,
+                            bottom = 4.dp
                         ),
                         fontSize = 12.sp,
                         color = Color(0xffa6b3cd)
@@ -545,8 +553,11 @@ class UmlTerminalActivity : ComponentActivity() {
                                 modifier = Modifier.fillMaxSize(),
                                 typeface = Typeface.MONOSPACE,
                                 initialFontSize = font.sp,
+                                minFontSize = 8.sp,
+                                maxFontSize = 24.sp,
                                 onFontSizeChanged = { newSize ->
-                                    font = newSize.value.toInt().coerceIn(8, 28)
+                                    font = newSize.value.toInt().coerceIn(8, 24)
+                                    preferences.edit().putInt("terminal_font_sp", font).apply()
                                 },
                                 backgroundColor = dark,
                                 foregroundColor = fg,
@@ -559,7 +570,11 @@ class UmlTerminalActivity : ComponentActivity() {
                                     terminalFocus.requestFocus()
                                     keyboardRestoreTick++
                                 },
-                                reflowOnKeyboard = true,
+                                reflowOnKeyboard = false,
+                                modifierManager = modifierManager,
+                                onSelectionControllerAvailable = { selectionController = it },
+                                onPasteShortcut = { pasteClipboard() },
+                                onPasteRequest = { pasteClipboard() },
                                 onScrollControllerAvailable = {
                                     terminalScrollController = it
                                 },
@@ -604,7 +619,7 @@ class UmlTerminalActivity : ComponentActivity() {
                             .horizontalScroll(
                                 rememberScrollState()
                             )
-                            .padding(4.dp),
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
                         horizontalArrangement =
                             Arrangement.spacedBy(4.dp)
                     ) {
@@ -618,12 +633,28 @@ class UmlTerminalActivity : ComponentActivity() {
                             Text("⌨ Keyboard", color = Color(0xffc3b2ff))
                         }
 
+                        TextButton(enabled = vmState.consoleReady, onClick = {
+                            val selected = selectionController?.getSelectedText().orEmpty()
+                            if (selected.isNotEmpty()) {
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Terminal", selected))
+                                selectionController?.clearSelection()
+                            } else selectionController?.startSelection()
+                        }) { Text("Copy") }
+                        TextButton(enabled = vmState.consoleReady, onClick = { pasteClipboard() }) {
+                            Text("Paste")
+                        }
+                        TextButton(enabled = vmState.consoleReady, onClick = { ctrlActive = !ctrlActive }) {
+                            Text(if (ctrlActive) "CTRL ON" else "CTRL")
+                        }
+
                         val keys = listOf(
                             "ESC" to "\u001b",
                             "TAB" to "\t",
                             "CTRL-C" to "\u0003",
                             "CTRL-D" to "\u0004",
                             "CTRL-Z" to "\u001a",
+                            "CTRL-X" to "\u0018",
+                            "CTRL-O" to "\u000f",
                             "←" to "\u001b[D",
                             "↓" to "\u001b[B",
                             "↑" to "\u001b[A",

@@ -35,6 +35,7 @@ internal object ActiveVm {
 internal object VmSettingsAction {
     const val EXTRA_ACTION = "vm_settings_action"
     const val START = "start"
+    const val RECOVERY = "recovery"
     const val STOP = "stop"
 }
 
