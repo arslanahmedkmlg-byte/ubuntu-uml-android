@@ -714,7 +714,6 @@ class UmlTerminalActivity : ComponentActivity() {
                                 },
                                 onImeVisibilityChanged = { visible ->
                                     imeVisible = visible
-                                    if (visible) terminalScrollController?.scrollToBottom()
                                 },
                                 onHyperlinkClick = { link ->
                                     val dest =
