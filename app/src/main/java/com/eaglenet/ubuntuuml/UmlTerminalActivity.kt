@@ -392,7 +392,7 @@ class UmlTerminalActivity : ComponentActivity() {
             val vmState = ActiveVm.state.value
 
             var font by remember {
-                mutableIntStateOf(preferences.getInt("terminal_font_sp", 11).coerceIn(8, 24))
+                mutableIntStateOf(preferences.getInt("terminal_font_sp", 8).coerceIn(8, 24))
             }
             var keyboardChoice by remember {
                 mutableStateOf(preferences.getString("keyboard_mode", "Secure") ?: "Secure")
