@@ -72,6 +72,8 @@ class UmlTerminalActivity : ComponentActivity() {
                     val validated = Typeface.createFromFile(candidate)
                     require(candidate.renameTo(path)) { "Could not save font" }
                     terminalTypeface = validated
+                    getSharedPreferences("uml_settings", MODE_PRIVATE).edit()
+                        .putString("terminal_font_family", "custom").apply()
                 } finally {
                     candidate.delete()
                 }
@@ -364,10 +366,13 @@ class UmlTerminalActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         terminalTypeface = runCatching { Typeface.createFromAsset(assets, "fonts/hack_nerd_font_mono_regular.ttf") }.getOrDefault(Typeface.MONOSPACE)
-        File(filesDir, "terminal-font.ttf").takeIf { it.isFile }?.let { fontFile ->
-            runCatching { Typeface.createFromFile(fontFile) }.onSuccess { terminalTypeface = it }
-        }
         val preferences = getSharedPreferences("uml_settings", MODE_PRIVATE)
+        when (preferences.getString("terminal_font_family", "bundled")) {
+            "system" -> terminalTypeface = Typeface.MONOSPACE
+            "custom" -> File(filesDir, "terminal-font.ttf").takeIf { it.isFile }?.let { fontFile ->
+                runCatching { Typeface.createFromFile(fontFile) }.onSuccess { terminalTypeface = it }
+            }
+        }
         val diskReady = disk.isFile && disk.length() > 128L * 1024L * 1024L
         ActiveVm.state.update { state ->
             state.copy(
@@ -626,11 +631,22 @@ class UmlTerminalActivity : ComponentActivity() {
                             Text("Font file")
                         }
                         TextButton(onClick = {
-                            File(filesDir, "terminal-font.ttf").delete()
+                            preferences.edit().putString("terminal_font_family", "bundled").apply()
                             terminalTypeface = runCatching {
                                 Typeface.createFromAsset(assets, "fonts/hack_nerd_font_mono_regular.ttf")
                             }.getOrDefault(Typeface.MONOSPACE)
                         }) { Text("Bundled") }
+                        TextButton(onClick = {
+                            preferences.edit().putString("terminal_font_family", "system").apply()
+                            terminalTypeface = Typeface.MONOSPACE
+                        }) { Text("System") }
+                        if (File(filesDir, "terminal-font.ttf").isFile) {
+                            TextButton(onClick = {
+                                runCatching { Typeface.createFromFile(File(filesDir, "terminal-font.ttf")) }
+                                    .onSuccess { terminalTypeface = it }
+                                preferences.edit().putString("terminal_font_family", "custom").apply()
+                            }) { Text("Custom") }
+                        }
 
                     }
 
