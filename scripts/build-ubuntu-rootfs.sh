@@ -163,7 +163,7 @@ set -g history-limit 25000
 set -g mouse off
 set -g status on
 set -g set-titles on
-set -g set-titles-string "Ubuntu UML · #{window_name}"
+set -g set-titles-string "UMLTABS|#{W:#{window_index}~#{window_name}~#{window_active};}"
 set -g renumber-windows on
 set -g default-terminal "screen-256color"
 set -g escape-time 10

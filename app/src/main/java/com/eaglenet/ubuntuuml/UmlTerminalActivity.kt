@@ -464,6 +464,7 @@ class UmlTerminalActivity : ComponentActivity() {
             }
 
             val guestTitle by emulator.terminalTitle.collectAsState()
+            val guestTabs = remember(guestTitle) { parseGuestTabs(guestTitle) }
 
             DisposableEffect(emulator) {
                 displayOutput = { bytes, size ->
@@ -500,7 +501,9 @@ class UmlTerminalActivity : ComponentActivity() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            guestTitle.takeIf { it.isNotBlank() }?.take(44)
+                            guestTabs.firstOrNull { it.active }?.let { "Ubuntu · ${it.name}" }
+                                ?: guestTitle.takeUnless { it.startsWith("UMLTABS|") }
+                                    ?.takeIf { it.isNotBlank() }?.take(44)
                                 ?: "Ubuntu 24.04 · UML",
                             color = fg,
                             modifier = Modifier.weight(1f),
@@ -526,6 +529,26 @@ class UmlTerminalActivity : ComponentActivity() {
                             }
                         ) {
                             Text("VM settings")
+                        }
+                    }
+
+                    if (vmState.running && !vmState.rootShell && guestTabs.isNotEmpty()) {
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            guestTabs.forEach { tab ->
+                                FilterChip(
+                                    selected = tab.active,
+                                    onClick = { session?.send(selectGuestTabInput(tab.index)) },
+                                    label = { Text("${tab.index}: ${tab.name}", maxLines = 1) },
+                                )
+                            }
+                            TextButton(onClick = {
+                                session?.send("\u0002c".toByteArray(Charsets.UTF_8))
+                            }) { Text("+ Tab") }
                         }
                     }
 
