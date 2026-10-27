@@ -396,6 +396,14 @@ class UmlTerminalActivity : ComponentActivity() {
             val havenKeyboardMode = when (keyboardChoice) {
                 "Standard" -> HavenKeyboardMode.Standard
                 "Raw" -> HavenKeyboardMode.Raw
+                "SwiftKey compatible" -> HavenKeyboardMode.Custom(
+                    sh.haven.core.terminal.ImeFlagSet(
+                        noSuggestions = true,
+                        visiblePassword = false,
+                        autoCorrect = false,
+                        fullEditor = false,
+                    )
+                )
                 else -> HavenKeyboardMode.Secure
             }
             val terminalFocus = remember { FocusRequester() }
@@ -601,7 +609,7 @@ class UmlTerminalActivity : ComponentActivity() {
                                 expanded = keyboardMenuOpen,
                                 onDismissRequest = { keyboardMenuOpen = false }
                             ) {
-                                listOf("Secure", "Standard", "Raw").forEach { mode ->
+                                listOf("Secure", "SwiftKey compatible", "Standard", "Raw").forEach { mode ->
                                     DropdownMenuItem(
                                         text = { Text(mode) },
                                         onClick = {
@@ -613,7 +621,7 @@ class UmlTerminalActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        Text("Secure recommended for SwiftKey", fontSize = 11.sp,
+                        Text("Secure recommended; compatibility option for OEM keyboards", fontSize = 11.sp,
                              color = Color(0xffa6b3cd))
                     }
 
@@ -783,16 +791,20 @@ class UmlTerminalActivity : ComponentActivity() {
                                 else "\u0002[/".toByteArray(Charsets.UTF_8))
                         }) { Text("Search") }
 
-                        // tmux, preinstalled in new rootfs images, owns the guest-side
-                        // PTYs so switching windows does not reboot or duplicate UML.
+                        // Each tmux window has its own guest PTY, process group,
+                        // shell and scrollback. The tmux status bar shows names.
                         val tabActions = listOf(
-                            "New tab" to "\u0002c",
-                            "Prev tab" to "\u0002p",
-                            "Next tab" to "\u0002n",
+                            "＋ Tab" to "\u0002c",
+                            "◀ Tab" to "\u0002p",
+                            "Tab ▶" to "\u0002n",
+                            "Rename" to "\u0002,",
+                            "List" to "\u0002w",
+                            "Close tab" to "\u0002&",
                         )
                         tabActions.forEach { (label, keys) ->
-                            TextButton(enabled = vmState.consoleReady && !vmState.rootShell,
-                                onClick = { session?.send(keys.toByteArray(Charsets.UTF_8)) }
+                            TextButton(
+                                enabled = vmState.consoleReady && !vmState.rootShell,
+                                onClick = { session?.send(keys.toByteArray(Charsets.UTF_8)) },
                             ) { Text(label, fontSize = 12.sp) }
                         }
 
