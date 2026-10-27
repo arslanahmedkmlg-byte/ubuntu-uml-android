@@ -417,6 +417,7 @@ class UmlTerminalActivity : ComponentActivity() {
             val terminalFocus = remember { FocusRequester() }
             val softwareKeyboard = LocalSoftwareKeyboardController.current
             var ctrlActive by remember { mutableStateOf(false) }
+            var ctrlLocked by remember { mutableStateOf(false) }
             var altActive by remember { mutableStateOf(false) }
             var selectionController by remember { mutableStateOf<SelectionController?>(null) }
             val modifierManager = remember {
@@ -425,7 +426,7 @@ class UmlTerminalActivity : ComponentActivity() {
                     override fun isAltActive() = altActive
                     override fun isShiftActive() = false
                     override fun clearTransients() {
-                        ctrlActive = false
+                        if (!ctrlLocked) ctrlActive = false
                         altActive = false
                     }
                 }
@@ -855,8 +856,14 @@ class UmlTerminalActivity : ComponentActivity() {
                             }
                         }) { Text("Copy output") }
 
-                        TextButton(enabled = vmState.consoleReady, onClick = { ctrlActive = !ctrlActive }) {
-                            Text(if (ctrlActive) "CTRL ON" else "CTRL")
+                        TextButton(enabled = vmState.consoleReady, onClick = {
+                            when {
+                                !ctrlActive -> { ctrlActive = true; ctrlLocked = false }
+                                !ctrlLocked -> ctrlLocked = true
+                                else -> { ctrlActive = false; ctrlLocked = false }
+                            }
+                        }) {
+                            Text(if (ctrlLocked) "CTRL LOCK" else if (ctrlActive) "CTRL ON" else "CTRL")
                         }
 
                         TextButton(enabled = vmState.consoleReady, onClick = { altActive = !altActive }) {
