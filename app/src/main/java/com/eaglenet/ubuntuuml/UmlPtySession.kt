@@ -119,6 +119,7 @@ class UmlPtySession(
                 File(stub),
                 share,
                 rootShell = rootShell,
+                ptyToken = GuestPtySession.authToken(context),
             ),
         )
 
@@ -128,6 +129,7 @@ class UmlPtySession(
             "PATH=/system/bin:/vendor/bin:${libs.absolutePath}",
             "TERM=xterm-256color",
             "PASST_NO_SANDBOX=1",
+            "PASST_TFWD=5951",
         )
 
         val response = forkWorker.submit<IntArray> {

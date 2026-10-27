@@ -8,6 +8,7 @@ internal fun buildUmlKernelCommandLine(
     stub: File,
     share: File,
     rootShell: Boolean,
+    ptyToken: String? = null,
 ): Array<String> = arrayOf(
     "mem=${ramMiB}M",
     "ubd0=${rootfs.absolutePath}",
@@ -18,6 +19,7 @@ internal fun buildUmlKernelCommandLine(
     "con=none",
     "con0=fd:0,fd:1",
     "console=tty0",
+    *(if (!rootShell && ptyToken != null) arrayOf("eaglenet_pty_token=$ptyToken") else emptyArray()),
     *(if (rootShell) {
         arrayOf("init=/bin/bash")
     } else {

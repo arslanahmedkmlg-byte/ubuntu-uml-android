@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts.StartActivityFo
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
@@ -58,32 +60,6 @@ class UmlTerminalActivity : ComponentActivity() {
         ((ByteArray, Int) -> Unit)? = null
 
     private var terminalTypeface by mutableStateOf(Typeface.MONOSPACE)
-
-    private val selectFont = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching {
-                val path = File(filesDir, "terminal-font.ttf")
-                val candidate = File(filesDir, "terminal-font.tmp")
-                try {
-                    contentResolver.openInputStream(uri)?.use { source ->
-                        FileOutputStream(candidate).use { dest -> source.copyTo(dest) }
-                    } ?: error("Cannot open selected font")
-                    require(candidate.length() in 1..4_194_304) { "Font must be smaller than 4 MiB" }
-                    val validated = Typeface.createFromFile(candidate)
-                    require(candidate.renameTo(path)) { "Could not save font" }
-                    terminalTypeface = validated
-                    getSharedPreferences("uml_settings", MODE_PRIVATE).edit()
-                        .putString("terminal_font_family", "custom").apply()
-                } finally {
-                    candidate.delete()
-                }
-            }.onFailure {
-                ActiveVm.state.update { state ->
-                    state.copy(status = "Font import failed: ${it.message}")
-                }
-            }
-        }
-    }
 
     private var imeVisible = false
     private var restoreKeyboardOnResume = false
@@ -387,14 +363,10 @@ class UmlTerminalActivity : ComponentActivity() {
         // Recover an interrupted atomic rootfs swap on next launch.
         if (!disk.exists() && rootfsBackup.isFile) rootfsBackup.renameTo(disk)
 
-        terminalTypeface = runCatching { Typeface.createFromAsset(assets, "fonts/hack_nerd_font_mono_regular.ttf") }.getOrDefault(Typeface.MONOSPACE)
         val preferences = getSharedPreferences("uml_settings", MODE_PRIVATE)
-        when (preferences.getString("terminal_font_family", "bundled")) {
-            "system" -> terminalTypeface = Typeface.MONOSPACE
-            "custom" -> File(filesDir, "terminal-font.ttf").takeIf { it.isFile }?.let { fontFile ->
-                runCatching { Typeface.createFromFile(fontFile) }.onSuccess { terminalTypeface = it }
-            }
-        }
+        val storedFont = preferences.getString("terminal_font_file", "JetBrainsMono-Regular.ttf")
+            ?.takeIf { it in terminalFontFiles } ?: "JetBrainsMono-Regular.ttf"
+        terminalTypeface = loadTerminalTypeface(assets, storedFont)
         val diskReady = disk.isFile && disk.length() > 128L * 1024L * 1024L
         ActiveVm.state.update { state ->
             state.copy(
@@ -414,7 +386,21 @@ class UmlTerminalActivity : ComponentActivity() {
             val vmState = ActiveVm.state.value
 
             var font by remember {
-                mutableIntStateOf(preferences.getInt("terminal_font_sp", 8).coerceIn(8, 24))
+                mutableIntStateOf(preferences.getInt("terminal_font_sp", 11).coerceIn(9, 18))
+            }
+            var selectedFont by remember {
+                mutableStateOf(preferences.getString("terminal_font_file", "JetBrainsMono-Regular.ttf")
+                    ?.takeIf { it in terminalFontFiles } ?: "JetBrainsMono-Regular.ttf")
+            }
+            var fontMenuOpen by remember { mutableStateOf(false) }
+            var sizeMenuOpen by remember { mutableStateOf(false) }
+            var colorMenuOpen by remember { mutableStateOf(false) }
+            var editingColor by remember { mutableStateOf<String?>(null) }
+            var backgroundColor by remember {
+                mutableStateOf(Color(preferences.getInt("terminal_background", 0xff000000.toInt())))
+            }
+            var foregroundColor by remember {
+                mutableStateOf(Color(preferences.getInt("terminal_foreground", 0xffeeeeee.toInt())))
             }
             var keyboardChoice by remember {
                 mutableStateOf(preferences.getString("keyboard_mode", "Secure") ?: "Secure")
@@ -422,7 +408,9 @@ class UmlTerminalActivity : ComponentActivity() {
             var keyboardMenuOpen by remember { mutableStateOf(false) }
             var renameWindowOpen by remember { mutableStateOf(false) }
             var windowName by remember { mutableStateOf("") }
-            var displaySettingsExpanded by remember { mutableStateOf(false) }
+            var searchOpen by remember { mutableStateOf(false) }
+            var searchQuery by remember { mutableStateOf("") }
+
             val havenKeyboardMode = when (keyboardChoice) {
                 "Standard" -> HavenKeyboardMode.Standard
                 "Raw" -> HavenKeyboardMode.Raw
@@ -454,10 +442,6 @@ class UmlTerminalActivity : ComponentActivity() {
                 }
             }
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            fun pasteClipboard() {
-                val content = clipboard.primaryClip?.getItemAt(0)?.coerceToText(this@UmlTerminalActivity)?.toString()
-                if (!content.isNullOrEmpty()) session?.send(content.toByteArray(Charsets.UTF_8))
-            }
             var terminalScrollController by remember {
                 mutableStateOf<org.connectbot.terminal.ScrollController?>(null)
             }
@@ -486,8 +470,90 @@ class UmlTerminalActivity : ComponentActivity() {
                 )
             }
 
-            val guestTitle by emulator.terminalTitle.collectAsState()
-            val guestTabs = remember(guestTitle) { parseGuestTabs(guestTitle) }
+            val tabs = remember { mutableStateListOf<GuestTabState>() }
+            var activeTabId by remember { mutableIntStateOf(-1) }
+            var nextTabId by remember { mutableIntStateOf(0) }
+            val activeTab = tabs.firstOrNull { it.id == activeTabId }
+            val activeEmulator = activeTab?.emulator ?: emulator
+            val inputReady = vmState.consoleReady && (activeTab == null || activeTab.connection != null)
+            LaunchedEffect(backgroundColor, foregroundColor, tabs.size) {
+                emulator.setDefaultColors(foregroundColor.toArgb(), backgroundColor.toArgb())
+                tabs.forEach { it.emulator.setDefaultColors(foregroundColor.toArgb(), backgroundColor.toArgb()) }
+            }
+            fun sendActive(bytes: ByteArray) {
+                val guest = activeTab?.connection
+                if (activeTab != null) guest?.send(bytes) else session?.send(bytes)
+            }
+            fun pasteClipboard() {
+                val content = clipboard.primaryClip?.getItemAt(0)?.coerceToText(this@UmlTerminalActivity)?.toString()
+                if (!content.isNullOrEmpty()) sendActive(content.toByteArray(Charsets.UTF_8))
+            }
+
+            fun addTab() {
+                val id = nextTabId++
+                val terminal = TerminalEmulatorFactory.create(
+                    autoDetectUrls = true, initialRows = 24, initialCols = 80,
+                    defaultForeground = foregroundColor, defaultBackground = backgroundColor,
+                    enableAltScreen = true,
+                    onKeyboardInput = { bytes -> tabs.firstOrNull { it.id == id }?.connection?.send(bytes) },
+                    onResize = { dims -> tabs.firstOrNull { it.id == id }?.connection
+                        ?.resize(dims.columns.coerceAtLeast(1), dims.rows.coerceAtLeast(1)) },
+                    onBell = {}, maxScrollbackLines = 25000,
+                )
+                val tab = GuestTabState(id, terminal, "Shell ${id + 1}")
+                tabs.add(tab)
+                activeTabId = id
+                Thread({
+                    for (attempt in 0..45) {
+                        if (tab.cancelled) return@Thread
+                        val connector = GuestPtySession(this@UmlTerminalActivity,
+                            onOutput = { bytes -> main.post {
+                                if (!tab.cancelled) tab.emulator.writeInput(bytes, 0, bytes.size)
+                            } }, onExit = { main.post {
+                                if (!tab.cancelled && tabs.contains(tab)) {
+                                    tabs.remove(tab)
+                                    tab.close()
+                                    if (activeTabId == tab.id) activeTabId = tabs.lastOrNull()?.id ?: -1
+                                }
+                            } })
+                        if (runCatching { connector.connect() }.isSuccess) {
+                            main.post {
+                                if (tab.cancelled) connector.close() else {
+                                    tab.connection = connector
+                                    connector.resize(terminalCols, terminalRows)
+                                    ActiveVm.state.update { it.copy(status = "Ubuntu ready") }
+                                }
+                            }
+                            return@Thread
+                        }
+                        connector.close()
+                        Thread.sleep(1000)
+                    }
+                    main.post { if (!tab.cancelled) {
+                        tabs.remove(tab); tab.close()
+                        if (activeTabId == tab.id) activeTabId = tabs.lastOrNull()?.id ?: -1
+                        ActiveVm.state.update { it.copy(status = "Guest PTY service unavailable") }
+                    } }
+                }, "uml-tab-connect-$id").start()
+            }
+            fun closeTab() {
+                val closing = activeTab ?: return
+                tabs.remove(closing)
+                closing.close()
+                activeTabId = tabs.lastOrNull()?.id ?: -1
+            }
+            LaunchedEffect(vmState.consoleReady, vmState.rootShell) {
+                if (vmState.consoleReady && !vmState.rootShell && tabs.isEmpty()) addTab()
+                if (!vmState.running) {
+                    tabs.toList().forEach { it.close() }
+                    tabs.clear()
+                    activeTabId = -1
+                }
+            }
+
+            DisposableEffect(tabs) {
+                onDispose { tabs.toList().forEach { it.close() } }
+            }
 
             DisposableEffect(emulator) {
                 displayOutput = { bytes, size ->
@@ -524,18 +590,11 @@ class UmlTerminalActivity : ComponentActivity() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            guestTabs.firstOrNull { it.active }?.let { "Ubuntu · ${it.name}" }
-                                ?: guestTitle.takeUnless { it.startsWith("UMLTABS|") }
-                                    ?.takeIf { it.isNotBlank() }?.take(44)
-                                ?: "Ubuntu 24.04 · UML",
+                            activeTab?.let { "Ubuntu · ${it.name}" } ?: "Ubuntu 24.04 · UML",
                             color = fg,
                             modifier = Modifier.weight(1f),
                             fontSize = 15.sp
                         )
-
-                        TextButton(onClick = { displaySettingsExpanded = !displaySettingsExpanded }) {
-                            Text(if (displaySettingsExpanded) "Hide display" else "Display")
-                        }
 
                         if (vmState.running) {
                             TextButton(onClick = { stopGuest() }) { Text("Stop") }
@@ -555,23 +614,20 @@ class UmlTerminalActivity : ComponentActivity() {
                         }
                     }
 
-                    if (vmState.running && !vmState.rootShell && guestTabs.isNotEmpty()) {
+                    if (vmState.running && !vmState.rootShell) {
                         Row(
                             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                                 .padding(horizontal = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            guestTabs.forEach { tab ->
+                            tabs.forEach { tab ->
                                 FilterChip(
-                                    selected = tab.active,
-                                    onClick = { session?.send(selectGuestTabInput(tab.index)) },
-                                    label = { Text("${tab.index}: ${tab.name}", maxLines = 1) },
+                                    selected = tab.id == activeTabId,
+                                    onClick = { activeTabId = tab.id },
+                                    label = { Text(tab.name, maxLines = 1) },
                                 )
                             }
-                            TextButton(onClick = {
-                                session?.send("\u0002c".toByteArray(Charsets.UTF_8))
-                            }) { Text("+ Tab") }
+                            TextButton(onClick = { addTab() }) { Text("+ Tab") }
                         }
                     }
 
@@ -592,10 +648,7 @@ class UmlTerminalActivity : ComponentActivity() {
                                     val safeName = windowName.trim()
                                         .filter { it.isLetterOrDigit() || it in " _-." }
                                         .take(32)
-                                    if (safeName.isNotEmpty()) {
-                                        session?.send("\u0002:rename-window \"$safeName\"\r"
-                                            .toByteArray(Charsets.UTF_8))
-                                    }
+                                    if (safeName.isNotEmpty()) activeTab?.name = safeName
                                     renameWindowOpen = false
                                 }) { Text("Rename") }
                             },
@@ -656,75 +709,58 @@ class UmlTerminalActivity : ComponentActivity() {
 
                     }
 
-                    if (displaySettingsExpanded) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Font", fontSize = 12.sp, color = fg)
-                        Slider(
-                            value = font.toFloat(),
-                            onValueChange = { font = it.toInt().coerceIn(8, 24) },
-                            onValueChangeFinished = {
-                                preferences.edit().putInt("terminal_font_sp", font).apply()
-                            },
-                            valueRange = 8f..24f,
-                            steps = 15,
-                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
-                        )
-                        Text("${font}sp", fontSize = 12.sp, color = fg)
-                        TextButton(onClick = { selectFont.launch(arrayOf("*/*")) }) {
-                            Text("Font file")
-                        }
-                        TextButton(onClick = {
-                            preferences.edit().putString("terminal_font_family", "bundled").apply()
-                            terminalTypeface = runCatching {
-                                Typeface.createFromAsset(assets, "fonts/hack_nerd_font_mono_regular.ttf")
-                            }.getOrDefault(Typeface.MONOSPACE)
-                        }) { Text("Bundled") }
-                        TextButton(onClick = {
-                            preferences.edit().putString("terminal_font_family", "system").apply()
-                            terminalTypeface = Typeface.MONOSPACE
-                        }) { Text("System") }
-                        if (File(filesDir, "terminal-font.ttf").isFile) {
-                            TextButton(onClick = {
-                                runCatching { Typeface.createFromFile(File(filesDir, "terminal-font.ttf")) }
-                                    .onSuccess { terminalTypeface = it }
-                                preferences.edit().putString("terminal_font_family", "custom").apply()
-                            }) { Text("Custom") }
-                        }
-
-                    }
-
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Keyboard", fontSize = 12.sp, color = fg)
-                        Box {
-                            TextButton(onClick = { keyboardMenuOpen = true }) {
-                                Text(keyboardChoice)
-                            }
-                            DropdownMenu(
-                                expanded = keyboardMenuOpen,
-                                onDismissRequest = { keyboardMenuOpen = false }
-                            ) {
-                                listOf("Secure", "SwiftKey compatible", "Standard", "Raw").forEach { mode ->
-                                    DropdownMenuItem(
-                                        text = { Text(mode) },
-                                        onClick = {
-                                            keyboardChoice = mode
-                                            preferences.edit().putString("keyboard_mode", mode).apply()
-                                            keyboardMenuOpen = false
-                                        }
-                                    )
+                    if (editingColor != null) {
+                        val target = editingColor!!
+                        TerminalColorWheelDialog(
+                            title = target,
+                            initial = if (target == "Terminal Color") backgroundColor else foregroundColor,
+                            onCancel = { editingColor = null },
+                            onPick = { color ->
+                                if (target == "Terminal Color") {
+                                    backgroundColor = color
+                                    preferences.edit().putInt("terminal_background", color.toArgb()).apply()
+                                } else {
+                                    foregroundColor = color
+                                    preferences.edit().putInt("terminal_foreground", color.toArgb()).apply()
                                 }
-                            }
-                        }
-                        Text("Secure recommended; compatibility option for OEM keyboards", fontSize = 11.sp,
-                             color = Color(0xffa6b3cd))
+                                editingColor = null
+                            },
+                        )
                     }
 
+                    if (searchOpen) {
+                        val matches = remember(searchQuery, activeEmulator) {
+                            if (searchQuery.isBlank()) emptyList()
+                            else activeEmulator.getSearchableLineTexts()
+                                .withIndex()
+                                .filter { it.value.contains(searchQuery, ignoreCase = true) }
+                                .takeLast(100).asReversed()
+                        }
+                        AlertDialog(
+                            onDismissRequest = { searchOpen = false },
+                            title = { Text("Find in terminal") },
+                            text = {
+                                Column {
+                                    OutlinedTextField(
+                                        value = searchQuery,
+                                        onValueChange = { searchQuery = it },
+                                        label = { Text("Search output") },
+                                        singleLine = true,
+                                    )
+                                    Text("${matches.size} recent matches")
+                                    Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+                                        matches.forEach { match ->
+                                            TextButton(onClick = {
+                                                terminalScrollController?.scrollToTop()
+                                                terminalScrollController?.scrollBy(-match.index)
+                                                searchOpen = false
+                                            }) { Text("${match.index + 1}: ${match.value.trim().take(100)}") }
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = { TextButton(onClick = { searchOpen = false }) { Text("Done") } },
+                        )
                     }
 
                     Text(
@@ -743,21 +779,22 @@ class UmlTerminalActivity : ComponentActivity() {
                             .fillMaxWidth()
                     ) {
 
+                            key(activeTabId) {
                             HavenTerminal(
-                                terminalEmulator = emulator,
+                                terminalEmulator = activeEmulator,
                                 modifier = Modifier.fillMaxSize(),
                                 typeface = terminalTypeface,
                                 initialFontSize = font.sp,
-                                minFontSize = 8.sp,
-                                maxFontSize = 24.sp,
+                                minFontSize = 9.sp,
+                                maxFontSize = 18.sp,
                                 onFontSizeChanged = { newSize ->
-                                    font = newSize.value.toInt().coerceIn(8, 24)
+                                    font = newSize.value.toInt().coerceIn(9, 18)
                                     preferences.edit().putInt("terminal_font_sp", font).apply()
                                 },
-                                backgroundColor = dark,
-                                foregroundColor = fg,
-                                keyboardEnabled = vmState.consoleReady,
-                                showSoftKeyboard = vmState.consoleReady,
+                                backgroundColor = backgroundColor,
+                                foregroundColor = foregroundColor,
+                                keyboardEnabled = inputReady,
+                                showSoftKeyboard = inputReady,
                                 imeRestoreTick = keyboardRestoreTick,
                                 keyboardMode = havenKeyboardMode,
                                 focusRequester = terminalFocus,
@@ -805,6 +842,7 @@ class UmlTerminalActivity : ComponentActivity() {
                                     }
                                 },
                             )
+                            }
 
                         if (selectionController?.isSelectionActive == true) {
                             Surface(
@@ -833,29 +871,10 @@ class UmlTerminalActivity : ComponentActivity() {
                     }
 
                     Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(
-                                rememberScrollState()
-                            )
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                             .padding(horizontal = 4.dp, vertical = 2.dp),
-                        horizontalArrangement =
-                            Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        TextButton(
-                            enabled = vmState.consoleReady,
-                            onClick = {
-                                if (imeVisible) {
-                                    softwareKeyboard?.hide()
-                                } else {
-                                    terminalFocus.requestFocus()
-                                    keyboardRestoreTick++
-                                }
-                            }
-                        ) {
-                            Text("⌨ Keyboard", color = Color(0xffc3b2ff))
-                        }
-
                         TextButton(enabled = vmState.consoleReady, onClick = {
                             val selected = selectionController?.getSelectedText().orEmpty()
                             if (selected.isNotEmpty()) {
@@ -863,59 +882,80 @@ class UmlTerminalActivity : ComponentActivity() {
                                 selectionController?.clearSelection()
                             } else selectionController?.startSelection()
                         }) { Text("Copy") }
+                        TextButton(enabled = vmState.consoleReady, onClick = { pasteClipboard() }) { Text("Paste") }
                         TextButton(enabled = vmState.consoleReady, onClick = {
                             selectionController?.selectAll()
-                        }) { Text("Select all") }
-                        TextButton(enabled = vmState.consoleReady, onClick = { pasteClipboard() }) {
-                            Text("Paste")
-                        }
-                        TextButton(enabled = vmState.consoleReady, onClick = {
-                            val lastOutput = emulator.getLastCommandOutput()
-                            if (lastOutput.isNullOrBlank()) {
-                                ActiveVm.state.update { it.copy(status = "No completed command output available") }
-                            } else {
-                                clipboard.setPrimaryClip(ClipData.newPlainText("Last command output", lastOutput))
-                            }
-                        }) { Text("Copy output") }
-
+                        }) { Text("Select All") }
                         TextButton(enabled = vmState.consoleReady, onClick = {
                             when {
                                 !ctrlActive -> { ctrlActive = true; ctrlLocked = false }
                                 !ctrlLocked -> ctrlLocked = true
                                 else -> { ctrlActive = false; ctrlLocked = false }
                             }
-                        }) {
-                            Text(if (ctrlLocked) "CTRL LOCK" else if (ctrlActive) "CTRL ON" else "CTRL")
-                        }
-
+                        }) { Text(if (ctrlLocked) "CTRL LOCK" else if (ctrlActive) "CTRL ON" else "CTRL") }
                         TextButton(enabled = vmState.consoleReady, onClick = { altActive = !altActive }) {
                             Text(if (altActive) "ALT ON" else "ALT")
                         }
-                        TextButton(enabled = vmState.consoleReady, onClick = {
-                            session?.send(if (vmState.rootShell) byteArrayOf(0x12)
-                                else "\u0002[/".toByteArray(Charsets.UTF_8))
-                        }) { Text("Search") }
-
-                        // Each tmux window has its own guest PTY, process group,
-                        // shell and scrollback. The tmux status bar shows names.
-                        val tabActions = listOf(
-                            "＋ Tab" to "\u0002c",
-                            "◀ Tab" to "\u0002p",
-                            "Tab ▶" to "\u0002n",
-                            "List" to "\u0002w",
-                            "Close tab" to "\u0002&",
-                        )
-                        TextButton(
-                            enabled = vmState.consoleReady && !vmState.rootShell,
-                            onClick = { renameWindowOpen = true },
-                        ) { Text("Rename tab", fontSize = 12.sp) }
-                        tabActions.forEach { (label, keys) ->
-                            TextButton(
-                                enabled = vmState.consoleReady && !vmState.rootShell,
-                                onClick = { session?.send(keys.toByteArray(Charsets.UTF_8)) },
-                            ) { Text(label, fontSize = 12.sp) }
+                        TextButton(enabled = vmState.consoleReady, onClick = { searchOpen = true }) {
+                            Text("Search")
                         }
-
+                        TextButton(enabled = activeTab != null, onClick = { closeTab() }) { Text("Close tab") }
+                        TextButton(enabled = activeTab != null, onClick = {
+                            windowName = activeTab?.name.orEmpty()
+                            renameWindowOpen = true
+                        }) { Text("Rename tab") }
+                        TextButton(enabled = vmState.consoleReady, onClick = {
+                            if (imeVisible) softwareKeyboard?.hide()
+                            else { terminalFocus.requestFocus(); keyboardRestoreTick++ }
+                        }) { Text("⌨ Keyboard") }
+                        Box {
+                            TextButton(onClick = { fontMenuOpen = true }) { Text("Font") }
+                            DropdownMenu(expanded = fontMenuOpen, onDismissRequest = { fontMenuOpen = false }) {
+                                terminalFontFiles.forEach { file ->
+                                    DropdownMenuItem(text = { Text(file.removeSuffix(".ttf")) }, onClick = {
+                                        selectedFont = file
+                                        terminalTypeface = loadTerminalTypeface(assets, file)
+                                        preferences.edit().putString("terminal_font_file", file).apply()
+                                        fontMenuOpen = false
+                                    })
+                                }
+                            }
+                        }
+                        Box {
+                            TextButton(onClick = { sizeMenuOpen = true }) { Text("${font}sp") }
+                            DropdownMenu(expanded = sizeMenuOpen, onDismissRequest = { sizeMenuOpen = false }) {
+                                (9..18).forEach { size ->
+                                    DropdownMenuItem(text = { Text("${size}sp") }, onClick = {
+                                        font = size
+                                        preferences.edit().putInt("terminal_font_sp", font).apply()
+                                        sizeMenuOpen = false
+                                    })
+                                }
+                            }
+                        }
+                        Box {
+                            TextButton(onClick = { colorMenuOpen = true }) { Text("Color") }
+                            DropdownMenu(expanded = colorMenuOpen, onDismissRequest = { colorMenuOpen = false }) {
+                                DropdownMenuItem(text = { Text("Terminal Color") }, onClick = {
+                                    editingColor = "Terminal Color"; colorMenuOpen = false
+                                })
+                                DropdownMenuItem(text = { Text("Font Color") }, onClick = {
+                                    editingColor = "Font Color"; colorMenuOpen = false
+                                })
+                            }
+                        }
+                        Box {
+                            TextButton(onClick = { keyboardMenuOpen = true }) { Text(keyboardChoice) }
+                            DropdownMenu(expanded = keyboardMenuOpen, onDismissRequest = { keyboardMenuOpen = false }) {
+                                listOf("Secure", "SwiftKey compatible", "Standard", "Raw").forEach { mode ->
+                                    DropdownMenuItem(text = { Text(mode) }, onClick = {
+                                        keyboardChoice = mode
+                                        preferences.edit().putString("keyboard_mode", mode).apply()
+                                        keyboardMenuOpen = false
+                                    })
+                                }
+                            }
+                        }
                     }
 
                     Row(
@@ -942,25 +982,13 @@ class UmlTerminalActivity : ComponentActivity() {
                             "PGDN" to "\u001b[6~",
                             "DEL" to "\u001b[3~",
                             "INS" to "\u001b[2~",
-                            "F1" to "\u001bOP",
-                            "F2" to "\u001bOQ",
-                            "F3" to "\u001bOR",
-                            "F4" to "\u001bOS",
-                            "F5" to "\u001b[15~",
-                            "F6" to "\u001b[17~",
-                            "F7" to "\u001b[18~",
-                            "F8" to "\u001b[19~",
-                            "F9" to "\u001b[20~",
-                            "F10" to "\u001b[21~",
-                            "F11" to "\u001b[23~",
-                            "F12" to "\u001b[24~",
                         )
 
                         keys.forEach { (label, seq) ->
                             TextButton(
                                 enabled = vmState.consoleReady,
                                 onClick = {
-                                    session?.send(
+                                    sendActive(
                                         seq.toByteArray(
                                             Charsets.UTF_8
                                         )

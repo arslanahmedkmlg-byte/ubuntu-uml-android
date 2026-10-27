@@ -80,7 +80,7 @@ PACKAGES=(
   systemd systemd-sysv systemd-resolved systemd-timesyncd udev dbus
   dbus-daemon sudo bash ca-certificates curl wget iproute2 iputils-ping
   netbase bind9-dnsutils vim-tiny less locales tzdata
-  util-linux login passwd procps kmod e2fsprogs git openssh-client tmux
+  util-linux login passwd procps kmod e2fsprogs git openssh-client python3-minimal
 )
 for package in "${PACKAGES[@]}"; do
   require_package "$package"
@@ -94,7 +94,6 @@ REQUIRED_FILES=(
   /usr/lib/systemd/system/systemd-udev-trigger.service
   /usr/lib/systemd/system/console-getty.service
   /usr/share/terminfo/x/xterm-256color
-  /usr/share/terminfo/s/screen-256color
   /etc/hosts /etc/hostname /etc/nsswitch.conf /etc/fstab
 )
 for path in "${REQUIRED_FILES[@]}"; do
@@ -106,7 +105,7 @@ EXECUTABLES=(
   /usr/bin/git /usr/bin/udevadm /usr/bin/resolvectl /usr/bin/networkctl
   /usr/bin/systemctl /usr/bin/dbus-daemon /usr/bin/ps /usr/bin/locale
   /usr/bin/timedatectl /usr/sbin/modprobe /usr/sbin/agetty /usr/bin/login
-  /usr/bin/passwd /usr/bin/tmux /usr/bin/mount /usr/sbin/mkfs.ext4 /usr/sbin/fsck.ext4
+  /usr/bin/passwd /usr/bin/python3 /usr/local/sbin/uml-pty-server /usr/bin/mount /usr/sbin/mkfs.ext4 /usr/sbin/fsck.ext4
   /usr/lib/systemd/systemd-udevd /usr/lib/systemd/systemd-networkd
   /usr/lib/systemd/systemd-resolved /usr/lib/systemd/systemd-timesyncd
 )
@@ -203,18 +202,24 @@ require_file /etc/systemd/system/getty.target.wants/console-getty.service
 require_file "${CONSOLE_OVERRIDE#"$MOUNT_DIR"}"
 grep -Fq -- '--autologin root' "$CONSOLE_OVERRIDE"
 grep -Fxq 'TTYPath=/dev/tty0' "$CONSOLE_OVERRIDE"
-require_file /root/.profile
-grep -Fq 'tmux new-session -A -s ubuntu' "$MOUNT_DIR/root/.profile"
-require_file /root/.tmux.conf
-grep -Fq 'set -g history-limit 25000' "$MOUNT_DIR/root/.tmux.conf"
-grep -Fq 'set -g set-titles on' "$MOUNT_DIR/root/.tmux.conf"
-grep -Fq 'UMLTABS|' "$MOUNT_DIR/root/.tmux.conf"
-grep -Fq 'allow-passthrough on' "$MOUNT_DIR/root/.tmux.conf"
+require_file /usr/local/sbin/uml-pty-server
+require_file /etc/systemd/system/uml-pty-server.service
+require_enabled uml-pty-server.service
 grep -Fq '_uml_osc133' "$MOUNT_DIR/root/.bashrc"
 grep -Fq ' tty0 xterm-256color' "$CONSOLE_OVERRIDE"
 grep -Fxq 'ExecStart=' "$CONSOLE_OVERRIDE"
 awk -F: '$1 == "root" && $2 ~ /^[!*]/ { locked=1 } END { exit !locked }' \
   "$MOUNT_DIR/etc/shadow"
+if dpkg-query --admindir="$MOUNT_DIR/var/lib/dpkg" -W \
+  -f='${Status}' tmux 2>/dev/null | grep -qx 'install ok installed'; then
+  echo "tmux must not be installed in the native PTY rootfs." >&2
+  exit 1
+fi
+if dpkg-query --admindir="$MOUNT_DIR/var/lib/dpkg" -W \
+  -f='${Status}' screen 2>/dev/null | grep -qx 'install ok installed'; then
+  echo "screen must not be installed in the native PTY rootfs." >&2
+  exit 1
+fi
 if dpkg-query --admindir="$MOUNT_DIR/var/lib/dpkg" -W \
   -f='${Status}' openssh-server 2>/dev/null | grep -qx 'install ok installed'; then
   echo "openssh-server must not be installed by default." >&2

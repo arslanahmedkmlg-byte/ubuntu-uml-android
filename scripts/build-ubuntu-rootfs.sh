@@ -99,7 +99,7 @@ chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get \
   systemd-sysv systemd-resolved systemd-timesyncd udev dbus sudo bash \
   ca-certificates \
   curl wget iproute2 iputils-ping netbase dnsutils vim-tiny less locales tzdata \
-  util-linux login passwd procps kmod e2fsprogs git openssh-client tmux
+  util-linux login passwd procps kmod e2fsprogs git openssh-client python3-minimal
 chroot "$ROOT" apt-get clean
 umount "$ROOT/sys"
 umount "$ROOT/proc"
@@ -150,39 +150,30 @@ mkdir -p "$ROOT/etc/systemd/system/getty.target.wants"
 ln -sfn /usr/lib/systemd/system/console-getty.service \
   "$ROOT/etc/systemd/system/getty.target.wants/console-getty.service"
 
-# An interactive login can host multiple independent guest PTYs with tmux.
-# Only start it on a real TTY, and leave an ordinary login shell available
-# if tmux cannot start. Do not involve the recovery init=/bin/bash path.
-cat >> "$ROOT/root/.profile" <<'TMUX_PROFILE'
-if [ -t 0 ] && [ -z "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
-  tmux new-session -A -s ubuntu
-fi
-TMUX_PROFILE
-cat > "$ROOT/root/.tmux.conf" <<'TMUX_CONF'
-set -g history-limit 25000
-set -g mouse off
-set -g status on
-set -g set-titles on
-set -g set-titles-string "UMLTABS|#{W:#{window_index}~#{window_name}~#{window_active};}"
-set -g renumber-windows on
-set -g default-terminal "screen-256color"
-set -g escape-time 10
-set -g allow-passthrough on
-TMUX_CONF
+# Independent guest PTYs are provided by the EagleNet session service;
+# no tmux, screen or other terminal multiplexer is installed.
+install -D -m 0755 "$(dirname "$0")/guest/uml_pty_server.py" \
+  "$ROOT/usr/local/sbin/uml-pty-server"
+cat > "$ROOT/etc/systemd/system/uml-pty-server.service" <<'PTY_SERVICE'
+[Unit]
+Description=EagleNet isolated guest PTY sessions
+After=systemd-networkd.service
+Wants=systemd-networkd.service
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/sbin/uml-pty-server
+Restart=always
+RestartSec=2
+[Install]
+WantedBy=multi-user.target
+PTY_SERVICE
+systemctl --root="$ROOT" enable uml-pty-server.service
 
-# OSC 133 marks shell prompt, input and output boundaries. This enables
-# accurate tap-to-position and "copy last output" in the Haven renderer.
-# tmux needs its DCS passthrough envelope for terminal-directed OSC codes.
+# OSC 133 prompt boundaries for the terminal renderer, sent directly.
 cat >> "$ROOT/root/.bashrc" <<'SHELL_INTEGRATION'
 if [[ $- == *i* && -z ${_UML_OSC133_READY:-} ]]; then
   _UML_OSC133_READY=1
-  _uml_osc133() {
-    if [[ -n ${TMUX:-} ]]; then
-      printf '\033Ptmux;\033\033]133;%s\007\033\\' "$1"
-    else
-      printf '\033]133;%s\007' "$1"
-    fi
-  }
+  _uml_osc133() { printf '\033]133;%s\007' "$1"; }
   _uml_previous_prompt_command=${PROMPT_COMMAND:-}
   _uml_finish_command() {
     local exit_code=$?
