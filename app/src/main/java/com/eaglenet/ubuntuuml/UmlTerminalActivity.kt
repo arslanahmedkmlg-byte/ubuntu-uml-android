@@ -392,6 +392,8 @@ class UmlTerminalActivity : ComponentActivity() {
                 mutableStateOf(preferences.getString("keyboard_mode", "Secure") ?: "Secure")
             }
             var keyboardMenuOpen by remember { mutableStateOf(false) }
+            var renameWindowOpen by remember { mutableStateOf(false) }
+            var windowName by remember { mutableStateOf("") }
             var displaySettingsExpanded by remember { mutableStateOf(false) }
             val havenKeyboardMode = when (keyboardChoice) {
                 "Standard" -> HavenKeyboardMode.Standard
@@ -516,6 +518,36 @@ class UmlTerminalActivity : ComponentActivity() {
                         ) {
                             Text("VM settings")
                         }
+                    }
+
+                    if (renameWindowOpen) {
+                        AlertDialog(
+                            onDismissRequest = { renameWindowOpen = false },
+                            title = { Text("Rename guest tab") },
+                            text = {
+                                OutlinedTextField(
+                                    value = windowName,
+                                    onValueChange = { windowName = it.take(32) },
+                                    label = { Text("Tab name") },
+                                    singleLine = true,
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    val safeName = windowName.trim()
+                                        .filter { it.isLetterOrDigit() || it in " _-." }
+                                        .take(32)
+                                    if (safeName.isNotEmpty()) {
+                                        session?.send("\u0002:rename-window \"$safeName\"\r"
+                                            .toByteArray(Charsets.UTF_8))
+                                    }
+                                    renameWindowOpen = false
+                                }) { Text("Rename") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { renameWindowOpen = false }) { Text("Cancel") }
+                            },
+                        )
                     }
 
                     if (!vmState.running) {
@@ -797,10 +829,13 @@ class UmlTerminalActivity : ComponentActivity() {
                             "＋ Tab" to "\u0002c",
                             "◀ Tab" to "\u0002p",
                             "Tab ▶" to "\u0002n",
-                            "Rename" to "\u0002,",
                             "List" to "\u0002w",
                             "Close tab" to "\u0002&",
                         )
+                        TextButton(
+                            enabled = vmState.consoleReady && !vmState.rootShell,
+                            onClick = { renameWindowOpen = true },
+                        ) { Text("Rename tab", fontSize = 12.sp) }
                         tabActions.forEach { (label, keys) ->
                             TextButton(
                                 enabled = vmState.consoleReady && !vmState.rootShell,
