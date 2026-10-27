@@ -93,6 +93,8 @@ REQUIRED_FILES=(
   /usr/lib/systemd/system/systemd-udevd-control.socket
   /usr/lib/systemd/system/systemd-udev-trigger.service
   /usr/lib/systemd/system/console-getty.service
+  /usr/share/terminfo/x/xterm-256color
+  /usr/share/terminfo/s/screen-256color
   /etc/hosts /etc/hostname /etc/nsswitch.conf /etc/fstab
 )
 for path in "${REQUIRED_FILES[@]}"; do
@@ -209,7 +211,7 @@ grep -Fq 'set -g set-titles on' "$MOUNT_DIR/root/.tmux.conf"
 grep -Fq 'UMLTABS|' "$MOUNT_DIR/root/.tmux.conf"
 grep -Fq 'allow-passthrough on' "$MOUNT_DIR/root/.tmux.conf"
 grep -Fq '_uml_osc133' "$MOUNT_DIR/root/.bashrc"
-grep -Fq ' tty0 vt102' "$CONSOLE_OVERRIDE"
+grep -Fq ' tty0 xterm-256color' "$CONSOLE_OVERRIDE"
 grep -Fxq 'ExecStart=' "$CONSOLE_OVERRIDE"
 awk -F: '$1 == "root" && $2 ~ /^[!*]/ { locked=1 } END { exit !locked }' \
   "$MOUNT_DIR/etc/shadow"

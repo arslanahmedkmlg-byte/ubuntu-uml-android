@@ -144,7 +144,7 @@ cat > "$ROOT/etc/systemd/system/console-getty.service.d/10-uml-autologin.conf" <
 [Service]
 ExecStart=
 TTYPath=/dev/tty0
-ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud 115200,38400,9600 tty0 vt102
+ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud 115200,38400,9600 tty0 xterm-256color
 GETTY
 mkdir -p "$ROOT/etc/systemd/system/getty.target.wants"
 ln -sfn /usr/lib/systemd/system/console-getty.service \
