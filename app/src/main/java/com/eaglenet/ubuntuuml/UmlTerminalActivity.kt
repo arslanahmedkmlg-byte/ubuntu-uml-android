@@ -91,6 +91,8 @@ class UmlTerminalActivity : ComponentActivity() {
 
     private val disk
         get() = File(filesDir, "uml/rootfs.ext4")
+    private val rootfsBackup
+        get() = File(filesDir, "uml/rootfs.backup.ext4")
 
     private val settingsLauncher = registerForActivityResult(StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK) {
@@ -125,7 +127,9 @@ class UmlTerminalActivity : ComponentActivity() {
                                     diskBytes = disk.length(),
                                     nativeRuntimeAvailable =
                                         UmlPtySession.nativeRuntimeAvailable(this),
-                                    status = "Rootfs ready · not running",
+                                    status = if (rootfsBackup.isFile) {
+                                        "Rootfs ready · previous filesystem preserved in backup"
+                                    } else "Rootfs ready · not running",
                                 )
                             }
                         }
@@ -203,6 +207,9 @@ class UmlTerminalActivity : ComponentActivity() {
 
     private fun importRootfs(uri: Uri) {
         val dest = disk
+        check(!dest.exists() || !rootfsBackup.exists()) {
+            "Rootfs backup already exists; export it before another replacement"
+        }
 
         dest.parentFile?.mkdirs()
 
@@ -233,12 +240,24 @@ class UmlTerminalActivity : ComponentActivity() {
                 "Filesystem too small (${tmp.length()} bytes)"
             }
 
-            if (!tmp.renameTo(dest)) {
-                dest.delete()
-
-                check(tmp.renameTo(dest)) {
-                    "Could not install Ubuntu filesystem"
+            if (dest.exists()) {
+                // Never delete the user's existing writable filesystem.
+                // Retain one backup and refuse additional replacements until
+                // the previous backup has been exported or handled explicitly.
+                check(!rootfsBackup.exists()) {
+                    "Rootfs backup already exists; export it before another replacement"
                 }
+                check(dest.renameTo(rootfsBackup)) {
+                    "Could not preserve the existing Ubuntu filesystem"
+                }
+                if (!tmp.renameTo(dest)) {
+                    check(rootfsBackup.renameTo(dest)) {
+                        "Import failed; previous rootfs is safe at ${rootfsBackup.absolutePath}"
+                    }
+                    error("Could not install Ubuntu filesystem; previous rootfs restored")
+                }
+            } else {
+                check(tmp.renameTo(dest)) { "Could not install Ubuntu filesystem" }
             }
 
         } catch (e: Exception) {
@@ -364,6 +383,9 @@ class UmlTerminalActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Recover an interrupted atomic rootfs swap on next launch.
+        if (!disk.exists() && rootfsBackup.isFile) rootfsBackup.renameTo(disk)
 
         terminalTypeface = runCatching { Typeface.createFromAsset(assets, "fonts/hack_nerd_font_mono_regular.ttf") }.getOrDefault(Typeface.MONOSPACE)
         val preferences = getSharedPreferences("uml_settings", MODE_PRIVATE)
