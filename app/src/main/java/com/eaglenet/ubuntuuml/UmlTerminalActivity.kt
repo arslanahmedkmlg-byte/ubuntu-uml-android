@@ -543,7 +543,9 @@ class UmlTerminalActivity : ComponentActivity() {
                 activeTabId = tabs.lastOrNull()?.id ?: -1
             }
             LaunchedEffect(vmState.consoleReady, vmState.rootShell) {
-                if (vmState.consoleReady && !vmState.rootShell && tabs.isEmpty()) addTab()
+                // The boot console is the first native terminal. Never create a
+                // second emulator or initiate a guest socket while UML starts.
+                // Additional independent PTYs are created only when + Tab is tapped.
                 if (!vmState.running) {
                     tabs.toList().forEach { it.close() }
                     tabs.clear()
@@ -620,6 +622,11 @@ class UmlTerminalActivity : ComponentActivity() {
                                 .padding(horizontal = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
+                            FilterChip(
+                                selected = activeTabId == -1,
+                                onClick = { activeTabId = -1 },
+                                label = { Text("Console") },
+                            )
                             tabs.forEach { tab ->
                                 FilterChip(
                                     selected = tab.id == activeTabId,
