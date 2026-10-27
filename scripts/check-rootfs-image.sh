@@ -205,6 +205,7 @@ require_file /root/.profile
 grep -Fq 'tmux new-session -A -s ubuntu' "$MOUNT_DIR/root/.profile"
 require_file /root/.tmux.conf
 grep -Fq 'set -g history-limit 25000' "$MOUNT_DIR/root/.tmux.conf"
+grep -Fq 'set -g set-titles on' "$MOUNT_DIR/root/.tmux.conf"
 grep -Fq 'allow-passthrough on' "$MOUNT_DIR/root/.tmux.conf"
 grep -Fq '_uml_osc133' "$MOUNT_DIR/root/.bashrc"
 grep -Fq ' tty0 vt102' "$CONSOLE_OVERRIDE"

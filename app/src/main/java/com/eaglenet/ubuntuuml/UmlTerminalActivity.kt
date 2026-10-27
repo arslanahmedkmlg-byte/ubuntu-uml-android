@@ -457,6 +457,8 @@ class UmlTerminalActivity : ComponentActivity() {
                 )
             }
 
+            val guestTitle by emulator.terminalTitle.collectAsState()
+
             DisposableEffect(emulator) {
                 displayOutput = { bytes, size ->
                     emulator.writeInput(
@@ -492,7 +494,8 @@ class UmlTerminalActivity : ComponentActivity() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Ubuntu 24.04 · UML",
+                            guestTitle.takeIf { it.isNotBlank() }?.take(44)
+                                ?: "Ubuntu 24.04 · UML",
                             color = fg,
                             modifier = Modifier.weight(1f),
                             fontSize = 15.sp
