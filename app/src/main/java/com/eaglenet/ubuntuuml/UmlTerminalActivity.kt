@@ -363,6 +363,7 @@ class UmlTerminalActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        terminalTypeface = runCatching { Typeface.createFromAsset(assets, "fonts/hack_nerd_font_mono_regular.ttf") }.getOrDefault(Typeface.MONOSPACE)
         File(filesDir, "terminal-font.ttf").takeIf { it.isFile }?.let { fontFile ->
             runCatching { Typeface.createFromFile(fontFile) }.onSuccess { terminalTypeface = it }
         }
@@ -626,8 +627,10 @@ class UmlTerminalActivity : ComponentActivity() {
                         }
                         TextButton(onClick = {
                             File(filesDir, "terminal-font.ttf").delete()
-                            terminalTypeface = Typeface.MONOSPACE
-                        }) { Text("Reset") }
+                            terminalTypeface = runCatching {
+                                Typeface.createFromAsset(assets, "fonts/hack_nerd_font_mono_regular.ttf")
+                            }.getOrDefault(Typeface.MONOSPACE)
+                        }) { Text("Bundled") }
 
                     }
 
