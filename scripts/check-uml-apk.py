@@ -64,6 +64,27 @@ def parse_elf(data: bytes, label: str):
     return segments
 
 
+def load_segments_match(expected, actual):
+    if len(expected) != len(actual):
+        return False
+
+    for expected_segment, actual_segment in zip(expected, actual):
+        if expected_segment[:5] != actual_segment[:5]:
+            return False
+
+        expected_data = bytearray(expected_segment[5])
+        actual_data = bytearray(actual_segment[5])
+        if expected_segment[1] == 0 and expected_data[:4] == b"\x7fELF":
+            # APK stripping can relocate the section table in the ELF header.
+            for start, end in ((40, 48), (60, 64)):
+                expected_data[start:end] = b"\0" * (end - start)
+                actual_data[start:end] = b"\0" * (end - start)
+        if expected_data != actual_data:
+            return False
+
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apk", type=Path, required=True)
@@ -96,7 +117,7 @@ def main() -> int:
             expected_data = Path(args.kernel).with_name(name).read_bytes()
             expected_segments = parse_elf(expected_data, name)
         actual_segments = parse_elf(packaged[name], f"{args.apk}:{apk_path}")
-        if expected_segments != actual_segments:
+        if not load_segments_match(expected_segments, actual_segments):
             print(f"APK {name} PT_LOAD segments differ from the build artifact", file=sys.stderr)
             return 1
 
