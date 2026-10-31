@@ -76,11 +76,13 @@ PATCH_SERIES=(
 	"$ROOT/kernel/patches/stub-execve-fallback.patch"
 	"$ROOT/kernel/patches/android-app-compat.patch"
 	"$ROOT/kernel/patches/vector-napi-budget.patch"
+	"$ROOT/kernel/patches/module-export-symbols.patch"
 )
 PATCH_HASHES=(
 	"1bcd1a7c935c59dd6e2f8c023451b3dd3efbf5a0308b574fd78d34f0f6b83e34"
 	"f97687ae4e40aee5f6e4ab136619d4af2c0f9f012a817850016a8f9fec6f0631"
 	"5e276e1b9766fd08276158be69fd8f2abf8854272e49d2ca4ddc99c6e20985e7"
+	"3100157aaf58edb6cbc064eb3cbc8a22c58584202a2079e64ad017c206813597"
 )
 for index in "${!PATCH_SERIES[@]}"; do
 	printf '%s  %s\n' "${PATCH_HASHES[$index]}" "${PATCH_SERIES[$index]}" |
@@ -190,7 +192,7 @@ fi
 verify_aarch64_static "$KERNEL"
 
 KERNEL_RELEASE="$(make "${MAKE_ARGS[@]}" -s kernelrelease)"
-EXPECTED_RELEASE="7.2.0-rc4-eaglenet-uml-cap34"
+EXPECTED_RELEASE="7.2.0-rc4-eaglenet-uml-cap34+"
 [[ "$KERNEL_RELEASE" == "$EXPECTED_RELEASE" ]] ||
 	fail "unexpected kernel release $KERNEL_RELEASE (expected $EXPECTED_RELEASE)"
 
@@ -201,7 +203,7 @@ printf 'obj-m += uml_module_probe.o\n' > "$MODULE_DIR/Makefile"
 make "${MAKE_ARGS[@]}" M="$MODULE_DIR" modules
 MODULE="$MODULE_DIR/uml_module_probe.ko"
 [[ -s "$MODULE" ]] || fail "external UML module probe was not built"
-strings "$MODULE" | grep -Fq "vermagic=$KERNEL_RELEASE " ||
+strings "$MODULE" | grep -F "vermagic=$KERNEL_RELEASE " >/dev/null ||
 	fail "module probe vermagic does not match $KERNEL_RELEASE"
 
 mkdir -p "$OUTPUT_DIR/rollback" "$OUTPUT_DIR/tools"
