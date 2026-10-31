@@ -29,6 +29,7 @@ on:
 
 jobs:
   kernel:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -54,7 +55,7 @@ jobs:
       - name: Build and verify kernel, stub and source bundle
         env:
           ARTIFACT_DIR: ${{ runner.temp }}/uml-kernel-artifacts
-        run: bash scripts/build-uml-kernel.sh
+        run: NDK="$ANDROID_HOME/ndk/27.0.12077973" bash scripts/build-uml-kernel.sh
       - uses: actions/upload-artifact@v4
         with:
           name: uml-kernel-apk-assets
@@ -83,6 +84,7 @@ jobs:
           retention-days: 7
 
   build:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     needs: kernel
     runs-on: ubuntu-latest
     permissions:
