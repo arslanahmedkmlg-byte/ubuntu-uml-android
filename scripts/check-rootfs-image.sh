@@ -108,6 +108,7 @@ EXECUTABLES=(
   /usr/bin/passwd /usr/bin/python3 /usr/local/sbin/uml-pty-server /usr/bin/mount /usr/sbin/mkfs.ext4 /usr/sbin/fsck.ext4
   /usr/lib/systemd/systemd-udevd /usr/lib/systemd/systemd-networkd
   /usr/lib/systemd/systemd-resolved /usr/lib/systemd/systemd-timesyncd
+  /usr/local/sbin/uml-kernel-acceptance
 )
 for path in "${EXECUTABLES[@]}"; do
   require_executable "$path"
@@ -191,8 +192,11 @@ done
 CONSOLE_OVERRIDE="$MOUNT_DIR/etc/systemd/system/console-getty.service.d/10-uml-autologin.conf"
 require_file /dev/console
 require_file /dev/tty0
+require_file /dev/fuse
 [[ -c "$MOUNT_DIR/dev/tty0" ]]
 [[ "$(stat -c '%t:%T' "$MOUNT_DIR/dev/tty0")" == '4:0' ]]
+[[ -c "$MOUNT_DIR/dev/fuse" ]]
+[[ "$(stat -c '%t:%T' "$MOUNT_DIR/dev/fuse")" == 'a:e5' ]]
 [[ -c "$MOUNT_DIR/dev/console" ]]
 [[ "$(stat -c '%t:%T' "$MOUNT_DIR/dev/console")" == '5:1' ]]
 require_file /etc/systemd/system/getty.target.wants/console-getty.service

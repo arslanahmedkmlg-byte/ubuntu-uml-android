@@ -5,6 +5,7 @@ import android.os.ParcelFileDescriptor
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import org.json.JSONObject
 import sh.haven.core.local.PtyBridge
 import java.io.Closeable
 import java.io.File
@@ -45,6 +46,20 @@ class UmlPtySession(
         }
     }
 
+    private val kernelIdentity: String by lazy {
+        context.assets.open("uml-kernel-manifest.json")
+            .bufferedReader()
+            .use { source ->
+                val kernel = JSONObject(source.readText()).getJSONObject("kernel")
+                val release = kernel.getString("release")
+                val featureSet = kernel.getString("feature_set")
+                val configHash = kernel.getString("config_sha256")
+                require(release.isNotBlank() && featureSet.isNotBlank())
+                require(configHash.matches(Regex("[0-9a-f]{64}")))
+                "$release ($featureSet, config ${configHash.take(12)})"
+            }
+    }
+
     private val writeWorker =
         Executors.newSingleThreadExecutor { job ->
             Thread(job, "uml-pty-writer").apply {
@@ -72,7 +87,7 @@ class UmlPtySession(
             writer?.write(bytes)
             writer?.flush()
         },
-        failed = failed,
+        failed = ::reportFailure,
     )
 
     fun start(rows: Int = 24, cols: Int = 80) {
@@ -202,7 +217,7 @@ class UmlPtySession(
                             killChild(processPid)
                         }
                     }
-                    failed("UML console read failed: ${error.message}")
+                    reportFailure("UML console read failed: ${error.message}")
                 }
             } finally {
                 synchronized(lifecycleLock) {
@@ -247,7 +262,7 @@ class UmlPtySession(
                         size.columns,
                     ) != 0 && !closed
                 ) {
-                    failed("Could not resize the UML console")
+                    reportFailure("Could not resize the UML console")
                 }
             }
         }
@@ -287,8 +302,12 @@ class UmlPtySession(
         } catch (error: ErrnoException) {
             if (error.errno != OsConstants.ESRCH) {
                 android.os.Process.killProcess(pid)
-                failed("Could not stop the UML process group: ${error.message}")
+                reportFailure("Could not stop the UML process group: ${error.message}")
             }
         }
+    }
+
+    private fun reportFailure(message: String) {
+        failed("$message\nUML kernel: $kernelIdentity")
     }
 }

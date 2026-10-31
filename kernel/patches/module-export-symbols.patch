@@ -1,0 +1,14 @@
+diff --git a/scripts/mod/modpost.c b/scripts/mod/modpost.c
+--- a/scripts/mod/modpost.c
++++ b/scripts/mod/modpost.c
+@@ -1105,7 +1105,10 @@
+ 
+ 	name = sym_name(elf, sym);
+-	if (strcmp(label_name + strlen(prefix), name)) {
++	if (strcmp(label_name + strlen(prefix), name) &&
++	    (!strstarts(name, "kernel_") ||
++	     strcmp(label_name + strlen(prefix),
++		    name + strlen("kernel_")))) {
+ 		error("%s: .export_symbol section references '%s', but it does not seem to be an export symbol\n",
+ 		      mod->name, name);
+ 		return;

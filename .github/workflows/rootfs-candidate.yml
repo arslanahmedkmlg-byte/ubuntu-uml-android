@@ -7,6 +7,8 @@ on:
       - 'app/src/main/cpp/uml_net.c'
       - 'scripts/build-ubuntu-rootfs.sh'
       - 'scripts/check-rootfs-image.sh'
+      - 'scripts/guest/test-kernel-capabilities.sh'
+      - 'scripts/guest/uml_pty_server.py'
   pull_request:
     branches: [main]
     paths:
@@ -14,6 +16,8 @@ on:
       - 'app/src/main/cpp/uml_net.c'
       - 'scripts/build-ubuntu-rootfs.sh'
       - 'scripts/check-rootfs-image.sh'
+      - 'scripts/guest/test-kernel-capabilities.sh'
+      - 'scripts/guest/uml_pty_server.py'
   workflow_dispatch:
     inputs:
       ubuntu_release:
@@ -27,6 +31,11 @@ on:
         required: true
         default: '2048'
         type: string
+      kernel_diagnostics:
+        description: Include optional guest kernel diagnostic tools
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: read
 jobs:
@@ -41,6 +50,7 @@ jobs:
         env:
           UBUNTU_RELEASE: ${{ inputs.ubuntu_release || 'noble' }}
           DISK_SIZE_MIB: ${{ inputs.disk_size_mib || '2048' }}
+          KERNEL_DIAGNOSTICS: ${{ inputs.kernel_diagnostics && '1' || '0' }}
           OUT_DIR: ${{ github.workspace }}/out
           WORK_DIR: ${{ github.workspace }}/.work
         run: sudo -E ./scripts/build-ubuntu-rootfs.sh

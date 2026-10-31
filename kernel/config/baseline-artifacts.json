@@ -1,0 +1,26 @@
+{
+  "release": "uml-guest-4",
+  "base_url": "https://github.com/GlassOnTin/uml-transport/releases/download/uml-guest-4",
+  "kernel_source_commit": "8897487c52233cd00cf2850008ca068892f1ae91",
+  "baseline_config_sha256": "84fae4254570e154b7c42764440b7910e82a74f7d63849d3d77ce42a0b1e1174",
+  "kernel": {
+    "release": "7.2.0-rc4",
+    "feature_set": "uml-guest-4-rollback",
+    "config_sha256": "84fae4254570e154b7c42764440b7910e82a74f7d63849d3d77ce42a0b1e1174",
+    "embedded_config_sha256": "84fae4254570e154b7c42764440b7910e82a74f7d63849d3d77ce42a0b1e1174"
+  },
+  "artifacts": {
+    "libvmlinux.so": {
+      "size": 79307152,
+      "sha256": "71cc9dc73c683a8c00fb533d01e7a1be27974876dcab2068419ea4b272fb387c"
+    },
+    "libuml-stub.so": {
+      "size": 1920,
+      "sha256": "83f51f7c45133daa135b595562b09c5e2829f1d0f1e00b7fce2a7695370781fc"
+    },
+    "libuml-passt.so": {
+      "size": 608472,
+      "sha256": "17703eb787afcfc57475921f186bec6eae479db00cf60e1763c1a8459c055b36"
+    }
+  }
+}

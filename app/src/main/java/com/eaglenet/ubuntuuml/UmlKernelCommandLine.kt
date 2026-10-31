@@ -11,6 +11,7 @@ internal fun buildUmlKernelCommandLine(
     ptyToken: String? = null,
 ): Array<String> = arrayOf(
     "mem=${ramMiB}M",
+    "ncpus=1",
     "ubd0=${rootfs.absolutePath}",
     "root=/dev/ubda",
     "rw",

@@ -18,6 +18,7 @@ class UmlKernelCommandLineTest {
         assertTrue(args.contains("con=none"))
         assertTrue(args.contains("con0=fd:0,fd:1"))
         assertTrue(args.contains("console=tty0"))
+        assertTrue(args.contains("ncpus=1"))
         assertTrue(args.contains("systemd.wants=console-getty.service"))
         assertFalse(args.contains("init=/bin/bash"))
     }

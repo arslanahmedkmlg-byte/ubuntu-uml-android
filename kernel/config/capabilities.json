@@ -1,0 +1,361 @@
+{
+  "schema_version": 1,
+  "kernel_source_commit": "8897487c52233cd00cf2850008ca068892f1ae91",
+  "capabilities": {
+    "1": {
+      "name": "Netfilter, nftables/iptables, conntrack and NAT",
+      "symbols": {
+        "NETFILTER": "y",
+        "NF_CONNTRACK": "y",
+        "NF_NAT": "y",
+        "NF_TABLES": "y",
+        "NF_TABLES_INET": "y",
+        "NF_TABLES_IPV4": "y",
+        "NF_TABLES_IPV6": "y",
+        "NFT_CT": "y",
+        "NFT_NAT": "y",
+        "NFT_MASQ": "y",
+        "NFT_REJECT": "y",
+        "NETFILTER_XTABLES": "y",
+        "NETFILTER_XTABLES_LEGACY": "y",
+        "IP_NF_IPTABLES_LEGACY": "y",
+        "IP_NF_FILTER": "y",
+        "IP_NF_NAT": "y",
+        "IP_NF_MANGLE": "y",
+        "IP_NF_TARGET_MASQUERADE": "y",
+        "IP6_NF_IPTABLES_LEGACY": "y",
+        "IP6_NF_FILTER": "y",
+        "IP6_NF_NAT": "y",
+        "IP6_NF_MANGLE": "y",
+        "IP6_NF_TARGET_MASQUERADE": "y",
+        "BRIDGE_NETFILTER": "y",
+        "NF_TABLES_BRIDGE": "y"
+      },
+      "unconditional": [
+        "NFT_COUNTER is compiled into nf_tables when NF_TABLES=y; Linux 7.2-rc4 has no NFT_COUNTER Kconfig symbol."
+      ],
+      "runtime_test": "Create/delete an isolated nft ruleset and test conntrack, forwarding and NAT in disposable namespaces; exercise iptables-nft and legacy tools without changing host rules."
+    },
+    "2": {
+      "name": "IPv6",
+      "symbols": {
+        "IPV6": "y",
+        "IPV6_MULTIPLE_TABLES": "y",
+        "IPV6_MROUTE": "y"
+      },
+      "runtime_test": "Test guest loopback, namespace veth traffic, router advertisements and routes; test passt external IPv6 separately."
+    },
+    "3": {
+      "name": "User namespaces",
+      "symbols": {
+        "NAMESPACES": "y",
+        "USER_NS": "y"
+      },
+      "runtime_test": "As a non-root guest account, run unshare --user --map-root-user and verify the UID map."
+    },
+    "4": {
+      "name": "PID namespaces",
+      "symbols": {
+        "PID_NS": "y",
+        "PROC_FS": "y"
+      },
+      "runtime_test": "Start a nested PID namespace with procfs mounted; verify its PID 1 and cleanup."
+    },
+    "5": {
+      "name": "Bridges",
+      "symbols": {
+        "BRIDGE": "y",
+        "VLAN_8021Q": "y",
+        "NF_TABLES_BRIDGE": "y"
+      },
+      "runtime_test": "Bridge two veth-backed namespaces, pass traffic and remove all test links."
+    },
+    "6": {
+      "name": "VETH",
+      "symbols": {
+        "VETH": "y",
+        "NET_NS": "y"
+      },
+      "runtime_test": "Create a veth pair, move endpoints into namespaces, pass packets, then remove them."
+    },
+    "7": {
+      "name": "Cgroup memory limits",
+      "symbols": {
+        "CGROUPS": "y",
+        "MEMCG": "y"
+      },
+      "unconditional": [
+        "Memory swap/accounting controls are integrated with MEMCG in this source; there is no separate MEMCG_SWAP Kconfig symbol."
+      ],
+      "runtime_test": "Apply a temporary cgroup v2 memory.max to a bounded process and verify enforcement without guest OOM."
+    },
+    "8": {
+      "name": "Cgroup process-count limits",
+      "symbols": {
+        "CGROUPS": "y",
+        "CGROUP_PIDS": "y"
+      },
+      "runtime_test": "Apply a small temporary pids.max, verify fork denial and clean up children."
+    },
+    "9": {
+      "name": "Cgroup CPU quotas",
+      "symbols": {
+        "CGROUPS": "y",
+        "CGROUP_SCHED": "y",
+        "FAIR_GROUP_SCHED": "y",
+        "CFS_BANDWIDTH": "y"
+      },
+      "runtime_test": "Set cpu.max for a bounded CPU load and verify throttling counters."
+    },
+    "10": {
+      "name": "OverlayFS",
+      "symbols": {
+        "OVERLAY_FS": "y",
+        "EXT4_FS": "y",
+        "EXT4_FS_POSIX_ACL": "y"
+      },
+      "unconditional": [
+        "Linux 7.2-rc4 has no EXT4_FS_XATTR Kconfig symbol; ext4 xattr handlers are built with EXT4_FS and EXT4_FS_SECURITY."
+      ],
+      "runtime_test": "Mount lower/upper/work/merged on disposable persistent guest storage; verify copy-up and unmount."
+    },
+    "11": {
+      "name": "FUSE",
+      "symbols": {
+        "FUSE_FS": "y",
+        "CUSE": "y"
+      },
+      "runtime_test": "Verify /dev/fuse and perform a local FUSE mount/unmount; test remote tools only when endpoints exist."
+    },
+    "12": {
+      "name": "SquashFS",
+      "symbols": {
+        "SQUASHFS": "y",
+        "SQUASHFS_ZLIB": "y",
+        "SQUASHFS_XZ": "y",
+        "SQUASHFS_LZ4": "y",
+        "SQUASHFS_ZSTD": "y"
+      },
+      "runtime_test": "Build and mount sample SquashFS images for each enabled compressor; read content and unmount."
+    },
+    "13": {
+      "name": "ext4 POSIX ACLs",
+      "symbols": {
+        "FS_POSIX_ACL": "y",
+        "EXT4_FS_POSIX_ACL": "y"
+      },
+      "runtime_test": "Set/get an ACL and prove access enforcement as a second guest user, including persistence."
+    },
+    "14": {
+      "name": "ext4 security xattrs",
+      "symbols": {
+        "EXT4_FS_SECURITY": "y",
+        "EXT4_FS": "y"
+      },
+      "runtime_test": "Verify security.* xattrs and file-capability behavior with guest tools."
+    },
+    "15": {
+      "name": "LSM framework and guest AppArmor",
+      "symbols": {
+        "SECURITY": "y",
+        "SECURITYFS": "y",
+        "SECURITY_APPARMOR": "y",
+        "LSM": "contains:apparmor"
+      },
+      "runtime_test": "Verify AppArmor is active, load a disposable profile and observe a denial; Android host SELinux remains separate."
+    },
+    "16": {
+      "name": "Kernel auditing",
+      "symbols": {
+        "AUDIT": "y",
+        "AUDITSYSCALL": "y"
+      },
+      "runtime_test": "Install a disposable audit rule and observe its event; distinguish syscall auditing from audit messaging."
+    },
+    "17": {
+      "name": "Kernel keyrings",
+      "symbols": {
+        "KEYS": "y"
+      },
+      "runtime_test": "Add/read/remove a temporary key with keyctl and verify permissions."
+    },
+    "18": {
+      "name": "Kernel crypto API",
+      "symbols": {
+        "CRYPTO": "y",
+        "CRYPTO_AES": "y",
+        "CRYPTO_XTS": "y",
+        "CRYPTO_CBC": "y",
+        "CRYPTO_SHA256": "y",
+        "CRYPTO_SHA512": "y",
+        "CRYPTO_HMAC": "y",
+        "CRYPTO_AUTHENC": "y",
+        "CRYPTO_GCM": "y",
+        "CRYPTO_CHACHA20POLY1305": "y",
+        "CRYPTO_USER_API": "y",
+        "CRYPTO_USER_API_HASH": "y",
+        "CRYPTO_USER_API_SKCIPHER": "y",
+        "CRYPTO_USER_API_AEAD": "y"
+      },
+      "runtime_test": "Inspect crypto API inventory and run bounded AF_ALG or subsystem tests; userspace TLS alone is insufficient."
+    },
+    "19": {
+      "name": "Device mapper and dm-crypt/LUKS",
+      "symbols": {
+        "MD": "y",
+        "BLK_DEV_DM": "y",
+        "DM_CRYPT": "y",
+        "DM_SNAPSHOT": "y",
+        "DM_THIN_PROVISIONING": "y",
+        "BLK_DEV_LOOP": "y",
+        "CRYPTO_AES": "y",
+        "CRYPTO_XTS": "y"
+      },
+      "unconditional": [
+        "The DM linear target is built into dm-mod when BLK_DEV_DM=y; this source has no DM_LINEAR Kconfig symbol."
+      ],
+      "runtime_test": "Open a disposable loop-backed encrypted image, format/mount/read/write/unmount/close it; do not touch user disks."
+    },
+    "20": {
+      "name": "eBPF program loading",
+      "symbols": {
+        "BPF": "y",
+        "BPF_SYSCALL": "y"
+      },
+      "runtime_test": "Load and run a minimal BPF program and inspect it; report interpreter versus JIT and preserve seccomp."
+    },
+    "21": {
+      "name": "Fanotify",
+      "symbols": {
+        "FANOTIFY": "y",
+        "FANOTIFY_ACCESS_PERMISSIONS": "y"
+      },
+      "runtime_test": "Observe a file event; test permission events separately using a bounded local helper."
+    },
+    "22": {
+      "name": "Traffic scheduling and shaping",
+      "symbols": {
+        "NET_SCHED": "y",
+        "NET_SCH_HTB": "y",
+        "NET_SCH_TBF": "y",
+        "NET_SCH_FQ_CODEL": "y",
+        "NET_SCH_INGRESS": "y",
+        "NET_CLS": "y",
+        "NET_CLS_U32": "y",
+        "NET_CLS_FLOWER": "y",
+        "NET_CLS_ACT": "y",
+        "NET_ACT_POLICE": "y",
+        "NET_ACT_MIRRED": "y",
+        "IFB": "y"
+      },
+      "runtime_test": "Shape a test veth with a temporary qdisc, verify rate/counters, then remove the qdisc."
+    },
+    "23": {
+      "name": "VLAN interfaces",
+      "symbols": {
+        "VLAN_8021Q": "y"
+      },
+      "runtime_test": "Create tagged test interfaces, pass isolated VLAN traffic and clean up."
+    },
+    "24": {
+      "name": "Multiple guest CPUs",
+      "symbols": {
+        "SMP": "y",
+        "NR_CPUS": "min:2",
+        "BROKEN_ON_SMP": "n"
+      },
+      "runtime_test": "Boot on a real compatible ARM64 host with at least two guest CPUs and exercise concurrent scheduling/network/PTY load."
+    },
+    "25": {
+      "name": "Loadable modules",
+      "symbols": {
+        "MODULES": "y",
+        "MODULE_UNLOAD": "y",
+        "MODVERSIONS": "y"
+      },
+      "unconditional": [
+        "Module signing is disabled because this guest has no private signing key; MODULE_SIG_FORCE is not enabled.",
+        "MODULES_TREE_LOOKUP stays disabled because it is selected only by PERF_EVENTS, TRACING or CFI, none of which is needed for module loading."
+      ],
+      "runtime_test": "Build/load/unload a benign matching test module; verify vermagic, dmesg, exact release path and depmod metadata."
+    },
+    "26": {
+      "name": "WireGuard",
+      "symbols": {
+        "WIREGUARD": "y"
+      },
+      "runtime_test": "Create a guest WireGuard interface and complete a local namespace peer handshake/traffic test."
+    },
+    "27": {
+      "name": "NFS client",
+      "symbols": {
+        "NFS_FS": "y",
+        "NFS_V3": "y",
+        "NFS_V4": "y"
+      },
+      "runtime_test": "Mount/read/write/unmount a disposable reachable NFS export; report unavailable endpoints."
+    },
+    "28": {
+      "name": "SMB/CIFS client",
+      "symbols": {
+        "CIFS": "y",
+        "CIFS_ALLOW_INSECURE_LEGACY": "n",
+        "KEYS": "y"
+      },
+      "runtime_test": "Mount/read/write/unmount a disposable SMB3 share; do not commit credentials."
+    },
+    "29": {
+      "name": "Btrfs",
+      "symbols": {
+        "BTRFS_FS": "y",
+        "FS_POSIX_ACL": "y"
+      },
+      "runtime_test": "Format a disposable loop image, mount, write, snapshot, read and unmount."
+    },
+    "30": {
+      "name": "XFS",
+      "symbols": {
+        "XFS_FS": "y",
+        "FS_POSIX_ACL": "y"
+      },
+      "runtime_test": "Format an adequately sized disposable loop image, mount/read/write/unmount."
+    },
+    "31": {
+      "name": "zram",
+      "symbols": {
+        "ZRAM": "y",
+        "ZRAM_BACKEND_LZ4": "y",
+        "ZRAM_DEF_COMP_LZ4": "y"
+      },
+      "runtime_test": "Create a small zram device, set compressor/size, exercise bounded I/O/swap, then reset it."
+    },
+    "32": {
+      "name": "zswap",
+      "symbols": {
+        "SWAP": "y",
+        "ZSWAP": "y",
+        "ZSWAP_DEFAULT_ON": "y",
+        "ZSWAP_COMPRESSOR_DEFAULT_LZ4": "y"
+      },
+      "runtime_test": "Use a temporary swap backing store and bounded workload; verify enabled state and compressed-page activity."
+    },
+    "33": {
+      "name": "Pressure Stall Information",
+      "symbols": {
+        "PSI": "y",
+        "PSI_DEFAULT_DISABLED": "n"
+      },
+      "runtime_test": "Read /proc/pressure/{cpu,memory,io} and verify valid counters under bounded pressure."
+    },
+    "34": {
+      "name": "Task statistics",
+      "symbols": {
+        "TASKSTATS": "y",
+        "TASK_DELAY_ACCT": "y",
+        "TASK_XACCT": "y",
+        "TASK_IO_ACCOUNTING": "y"
+      },
+      "runtime_test": "Query taskstats with a real userspace client and verify delay/I/O accounting."
+    }
+  }
+}

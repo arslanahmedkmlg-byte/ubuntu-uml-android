@@ -7,6 +7,7 @@ set -Eeuo pipefail
 RELEASE="${UBUNTU_RELEASE:-noble}"
 ARCH="arm64"
 SIZE_MIB="${DISK_SIZE_MIB:-2048}"
+KERNEL_DIAGNOSTICS="${KERNEL_DIAGNOSTICS:-0}"
 OUT="${OUT_DIR:-$PWD/out}"
 WORK="${WORK_DIR:-$PWD/.work}"
 ROOT="$WORK/rootfs"
@@ -30,6 +31,10 @@ trap cleanup_mounts EXIT
 
 if [[ "$(id -u)" != 0 ]]; then
   echo "Run this script as root on an Ubuntu build runner." >&2
+  exit 2
+fi
+if [[ "$KERNEL_DIAGNOSTICS" != 0 && "$KERNEL_DIAGNOSTICS" != 1 ]]; then
+  echo "KERNEL_DIAGNOSTICS must be 0 or 1." >&2
   exit 2
 fi
 if ! [[ "$SIZE_MIB" =~ ^[0-9]+$ ]] || (( SIZE_MIB < 1024 )); then
@@ -72,7 +77,7 @@ FSTAB
 mkdir -p "$ROOT/dev/pts" "$ROOT/dev/shm" "$ROOT/run" "$ROOT/tmp"
 chmod 1777 "$ROOT/dev/shm" "$ROOT/tmp"
 # UML device nodes are not guaranteed to be supplied by devtmpfs.
-for spec in 'null:c:1:3:666' 'zero:c:1:5:666' 'tty:c:5:0:666' 'tty0:c:4:0:600' 'console:c:5:1:600' 'random:c:1:8:666' 'urandom:c:1:9:666'; do
+for spec in 'null:c:1:3:666' 'zero:c:1:5:666' 'tty:c:5:0:666' 'tty0:c:4:0:600' 'console:c:5:1:600' 'random:c:1:8:666' 'urandom:c:1:9:666' 'fuse:c:10:229:666'; do
   IFS=: read -r node kind major minor mode <<< "$spec"
   if [[ ! -e "$ROOT/dev/$node" ]]; then mknod "$ROOT/dev/$node" "$kind" "$major" "$minor"; fi
   chmod "$mode" "$ROOT/dev/$node"
@@ -94,12 +99,22 @@ mountpoint -q "$ROOT/sys"
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
 # Keep the full guest utility baseline while avoiding recommends that are not
 # needed for UML, networking, package management, or local console use.
+GUEST_PACKAGES=(
+  systemd-sysv systemd-resolved systemd-timesyncd udev dbus sudo bash
+  ca-certificates
+  curl wget iproute2 iputils-ping netbase dnsutils vim-tiny less locales tzdata
+  util-linux login passwd procps kmod e2fsprogs git openssh-client python3-minimal
+)
+if [[ "$KERNEL_DIAGNOSTICS" == 1 ]]; then
+  GUEST_PACKAGES+=(
+    acl apparmor apparmor-utils auditd bpftool btrfs-progs cifs-utils conntrack
+    cryptsetup-bin fuse3 iptables keyutils libcap2-bin nfs-common nftables
+    radvd squashfs-tools wireguard-tools xfsprogs
+  )
+fi
 chroot "$ROOT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get \
   -o Dpkg::Use-Pty=0 install -y --no-install-recommends \
-  systemd-sysv systemd-resolved systemd-timesyncd udev dbus sudo bash \
-  ca-certificates \
-  curl wget iproute2 iputils-ping netbase dnsutils vim-tiny less locales tzdata \
-  util-linux login passwd procps kmod e2fsprogs git openssh-client python3-minimal
+  "${GUEST_PACKAGES[@]}"
 chroot "$ROOT" apt-get clean
 umount "$ROOT/sys"
 umount "$ROOT/proc"
@@ -154,6 +169,8 @@ ln -sfn /usr/lib/systemd/system/console-getty.service \
 # no tmux, screen or other terminal multiplexer is installed.
 install -D -m 0755 "$(dirname "$0")/guest/uml_pty_server.py" \
   "$ROOT/usr/local/sbin/uml-pty-server"
+install -D -m 0755 "$(dirname "$0")/guest/test-kernel-capabilities.sh" \
+  "$ROOT/usr/local/sbin/uml-kernel-acceptance"
 cat > "$ROOT/etc/systemd/system/uml-pty-server.service" <<'PTY_SERVICE'
 [Unit]
 Description=EagleNet isolated guest PTY sessions
@@ -222,6 +239,7 @@ test -x "$ROOT/usr/bin/udevadm"
 test -x "$ROOT/usr/bin/ssh"
 test -x "$ROOT/usr/bin/git"
 test -x "$ROOT/usr/sbin/modprobe"
+test -x "$ROOT/usr/local/sbin/uml-kernel-acceptance"
 grep -Fq -- '--autologin root' \
   "$ROOT/etc/systemd/system/console-getty.service.d/10-uml-autologin.conf"
 test -L "$ROOT/etc/systemd/system/getty.target.wants/console-getty.service"
@@ -252,4 +270,5 @@ test -x "$ROOT/bin/sh"
 test -x "$ROOT/usr/bin/apt-get"
 (cd "$OUT" && sha256sum "$(basename "$IMG")" | tee "$(basename "$IMG").sha256")
 echo "Candidate image: $IMG"
+echo "Kernel diagnostics profile: $KERNEL_DIAGNOSTICS"
 echo "NOTE: boot under ARM64 UML and test networking/APT/persistence before release."
