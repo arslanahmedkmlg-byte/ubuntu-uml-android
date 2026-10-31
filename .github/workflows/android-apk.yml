@@ -5,12 +5,85 @@ on:
   push:
     paths:
       - 'app/**'
+      - 'kernel/**'
+      - 'scripts/build-uml-kernel.sh'
+      - 'scripts/validate-uml-config.py'
+      - 'scripts/check-uml-apk.py'
+      - 'scripts/fetch-uml.sh'
+      - 'docs/source-pins.md'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/android-apk.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'kernel/**'
+      - 'scripts/build-uml-kernel.sh'
+      - 'scripts/validate-uml-config.py'
+      - 'scripts/check-uml-apk.py'
+      - 'scripts/fetch-uml.sh'
+      - 'docs/source-pins.md'
       - '*.gradle.kts'
       - 'gradle.properties'
       - '.github/workflows/android-apk.yml'
 
 jobs:
+  kernel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc flex bison clang
+      - name: Install pinned Android NDK
+        shell: bash
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager"
+          set +e
+          yes | "$sdkmanager" --licenses >/dev/null
+          result=${PIPESTATUS[1]}
+          set -e
+          test "$result" -eq 0
+          "$sdkmanager" --install "ndk;27.0.12077973"
+      - name: Build and verify kernel, stub and source bundle
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/uml-kernel-artifacts
+        run: bash scripts/build-uml-kernel.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uml-kernel-apk-assets
+          path: |
+            ${{ runner.temp }}/uml-kernel-artifacts/libvmlinux.so
+            ${{ runner.temp }}/uml-kernel-artifacts/libuml-stub.so
+            ${{ runner.temp }}/uml-kernel-artifacts/libuml-passt.so
+            ${{ runner.temp }}/uml-kernel-artifacts/manifest.json
+            ${{ runner.temp }}/uml-kernel-artifacts/tools/extract-ikconfig
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uml-kernel-provenance
+          path: |
+            ${{ runner.temp }}/uml-kernel-artifacts/uml-kernel-source-bundle.tar.gz
+            ${{ runner.temp }}/uml-kernel-artifacts/kernel-build.log
+            ${{ runner.temp }}/uml-kernel-artifacts/kernel.config
+            ${{ runner.temp }}/uml-kernel-artifacts/embedded.config
+            ${{ runner.temp }}/uml-kernel-artifacts/capabilities-config-report.json
+            ${{ runner.temp }}/uml-kernel-artifacts/seccomp-*.log
+            ${{ runner.temp }}/uml-kernel-artifacts/uml_module_probe.ko
+            ${{ runner.temp }}/uml-kernel-artifacts/SHA256SUMS
+            ${{ runner.temp }}/uml-kernel-artifacts/rollback/**
+          if-no-files-found: error
+          retention-days: 7
+
   build:
+    needs: kernel
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -30,9 +103,19 @@ jobs:
         run: |
           test -d "$ANDROID_HOME/ndk/29.0.14206865"
           test -x "$ANDROID_HOME/cmake/3.31.5/bin/cmake"
-      - name: Download checksum-verified UML binaries
-        run: UML_OUTPUT="$PWD/app/src/main/jniLibs" bash scripts/fetch-uml.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: uml-kernel-apk-assets
+          path: ${{ runner.temp }}/uml-kernel-artifacts
+      - name: Install checksum-verified kernel artifact set
+        env:
+          UML_OUTPUT: ${{ github.workspace }}/app/src/main/jniLibs
+          UML_ARTIFACT_MANIFEST: ${{ runner.temp }}/uml-kernel-artifacts/manifest.json
+          UML_RELEASE_MIRROR: file://${{ runner.temp }}/uml-kernel-artifacts
+        run: bash scripts/fetch-uml.sh
       - name: Run terminal and VM regression tests
+        env:
+          UML_ARTIFACT_MANIFEST: ${{ runner.temp }}/uml-kernel-artifacts/manifest.json
         run: |
           gradle --no-daemon -p third_party/termlib :lib:testDebugUnitTest \
             --tests org.connectbot.terminal.KeyboardHandlerTest \
@@ -40,7 +123,20 @@ jobs:
             --tests org.connectbot.terminal.ResizeReflowTest \
             --tests org.connectbot.terminal.TerminalLifetimeTest
           gradle --no-daemon :app:testDebugUnitTest
-      - run: gradle --no-daemon :app:assembleDebug
+      - name: Assemble debug APK
+        env:
+          UML_ARTIFACT_MANIFEST: ${{ runner.temp }}/uml-kernel-artifacts/manifest.json
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Verify APK contains the built UML kernel
+        run: |
+          apk="$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)"
+          test -n "$apk"
+          python3 scripts/check-uml-apk.py \
+            --apk "$apk" \
+            --kernel "$RUNNER_TEMP/uml-kernel-artifacts/libvmlinux.so" \
+            --manifest "$RUNNER_TEMP/uml-kernel-artifacts/manifest.json" \
+            --extract-ikconfig "$RUNNER_TEMP/uml-kernel-artifacts/tools/extract-ikconfig" \
+            --seccomp-checker kernel/harness/check-app-seccomp.sh
       - uses: actions/upload-artifact@v4
         with:
           name: ubuntu-uml-debug-apk

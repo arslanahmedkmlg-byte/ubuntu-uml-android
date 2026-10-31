@@ -18,35 +18,49 @@
 # (and F-Droid, via -PskipUml) simply lack the guest transport; the
 # NativeFeatures.uml probe hides the UI.
 #
-# Version-pinned release assets with sha256s (github.com/GlassOnTin/
-# uml-transport, tag uml-guest-4). The kernel is GPL-2.0; its source
-# (branch um-arm64 of zalexdev/linux-um-arm64 at 7edec4df1 plus the
-# stub-execve-fallback and android-app-compat patches, all published
-# there with the build recipes) is published, which satisfies the
-# distribution terms. The kernel link output is additionally neutered
-# for the syscalls Android's zygote seccomp filter force-kills
-# (set_robust_list, rseq) — the gate and the patch live in this repo's
-# releases repo, GlassOnTin/uml-transport, under tools/um-arm64/harness/.
-# When the pin is retired,
-# the fetch fails LOUDLY — bump UML_RELEASE and the sha256s together.
-# Skip with ./gradlew -PskipUml or SKIP_UML=1 (F-Droid).
+# The rollback artifact pins live together in kernel/config/baseline-artifacts.json.
+# CI may supply a generated manifest and mirror containing a new kernel/stub
+# pair plus the unchanged passt binary.
+# Skip with SKIP_UML=1. The Gradle project property is not wired to this
+# standalone fetch script.
 #
 # UML_RELEASE_MIRROR overrides the base URL (file:// works) for
 # offline/airgapped builds.
 
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$SCRIPT_DIR"
 
-OUT="${UML_OUTPUT:-src/main/jniLibs}"
-BASE="${UML_RELEASE_MIRROR:-https://github.com/GlassOnTin/uml-transport/releases/download/uml-guest-4}"
+OUT="${UML_OUTPUT:-$SCRIPT_DIR/src/main/jniLibs}"
+MANIFEST="${UML_ARTIFACT_MANIFEST:-$REPO_ROOT/kernel/config/baseline-artifacts.json}"
+if [ ! -s "$MANIFEST" ]; then
+    echo "fetch-uml: artifact manifest is missing: $MANIFEST" >&2
+    exit 1
+fi
 
-# file | sha256
-# Sizes: libvmlinux.so 79307152, libuml-stub.so 1920, libuml-passt.so 608472
-FILES=(
-  "libvmlinux.so|71cc9dc73c683a8c00fb533d01e7a1be27974876dcab2068419ea4b272fb387c"
-  "libuml-stub.so|83f51f7c45133daa135b595562b09c5e2829f1d0f1e00b7fce2a7695370781fc"
-  "libuml-passt.so|17703eb787afcfc57475921f186bec6eae479db00cf60e1763c1a8459c055b36"
-)
+BASE="${UML_RELEASE_MIRROR:-$(python3 - "$MANIFEST" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as manifest_file:
+    print(json.load(manifest_file)["base_url"])
+PY
+)}"
+
+ASSETS=(libvmlinux.so libuml-stub.so libuml-passt.so)
+python3 - "$MANIFEST" "${ASSETS[@]}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as manifest_file:
+    manifest = json.load(manifest_file)
+assets = manifest.get("artifacts", {})
+for name in sys.argv[2:]:
+    entry = assets.get(name)
+    if not isinstance(entry, dict) or len(entry.get("sha256", "")) != 64:
+        raise SystemExit(f"fetch-uml: manifest has no SHA-256 pin for {name}")
+PY
 
 if [ "${SKIP_UML:-0}" = "1" ]; then
     echo "fetch-uml: SKIP_UML=1 — APK will lack the UML guest transport"
@@ -54,14 +68,54 @@ if [ "${SKIP_UML:-0}" = "1" ]; then
 fi
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+CANDIDATE=""
+cleanup() {
+    if [ -n "$CANDIDATE" ]; then
+        rm -f -- "$CANDIDATE"
+    fi
+    rm -rf -- "$TMP"
+}
+trap cleanup EXIT
 
-for spec in "${FILES[@]}"; do
-    IFS='|' read -r name sha <<< "$spec"
+verify_artifact() {
+    local path="$1"
+    local machine
+
+    machine="$(readelf -h "$path" 2>/dev/null | sed -n 's/^[[:space:]]*Machine:[[:space:]]*//p')"
+    if [ "$machine" != "AArch64" ]; then
+        echo "fetch-uml: $path is not an AArch64 ELF (machine: ${machine:-unknown})" >&2
+        return 1
+    fi
+    if readelf -l "$path" 2>/dev/null | grep -q 'INTERP'; then
+        echo "fetch-uml: $path has a dynamic interpreter; Android execution requires static artifacts" >&2
+        return 1
+    fi
+}
+
+if ! command -v readelf >/dev/null 2>&1; then
+    echo "fetch-uml: readelf is required to verify artifact architecture and linkage" >&2
+    exit 1
+fi
+
+mkdir -p "$OUT/arm64-v8a"
+
+for name in "${ASSETS[@]}"; do
+    sha="$(python3 - "$MANIFEST" "$name" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as manifest_file:
+    print(json.load(manifest_file)["artifacts"][sys.argv[2]]["sha256"])
+PY
+)"
     dest="$OUT/arm64-v8a/$name"
     if [ -s "$dest" ]; then
-        echo "fetch-uml: $dest present — skipping"
-        continue
+        if printf '%s  %s\n' "$sha" "$dest" | sha256sum -c - >/dev/null 2>&1 &&
+            verify_artifact "$dest"; then
+            echo "fetch-uml: $dest verified — skipping"
+            continue
+        fi
+        echo "fetch-uml: cached $dest failed verification; fetching a replacement" >&2
     fi
     url="$BASE/$name"
     echo "fetch-uml: $url"
@@ -77,7 +131,10 @@ for spec in "${FILES[@]}"; do
         echo "fetch-uml: sha256 MISMATCH for $name" >&2
         exit 1
     }
-    mkdir -p "$OUT/arm64-v8a"
-    install -m 0755 "$TMP/$name" "$dest"
+    verify_artifact "$TMP/$name"
+    CANDIDATE="$(mktemp "$dest.tmp.XXXXXX")"
+    install -m 0755 "$TMP/$name" "$CANDIDATE"
+    mv -f -- "$CANDIDATE" "$dest"
+    CANDIDATE=""
     echo "fetch-uml: installed $dest ($(stat -c %s "$dest") bytes)"
 done
